@@ -3,11 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "start": "node --import tsx main.ts"
+    "start": "node --env-file-if-exists=.env --import tsx main.ts",
+    "chat": "node --env-file-if-exists=.env --import tsx main.ts --chat",
+    "web": "node --env-file-if-exists=.env --import tsx src/web/main.ts",
+    "roleplay": "node --env-file-if-exists=.env --import tsx scripts/roleplay.ts",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc"
   },
   "dependencies": {
     "@guava-ai/guava-sdk": "*",
     "tsx": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2"
   }
 }

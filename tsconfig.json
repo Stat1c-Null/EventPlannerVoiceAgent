@@ -5,7 +5,9 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
   },
-  "include": ["main.ts"]
+  "include": ["main.ts", "src", "scripts", "test"]
 }
