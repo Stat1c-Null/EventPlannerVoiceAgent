@@ -1,0 +1,9 @@
+project_id = "gp-f1ac3829-321b-4abe-bc71-e5a008ecc7ac"
+org_id = "6acd545f452fb4de9fa15d5c"
+name = "guavahackathonagent"
+call_direction = "inbound"
+base_image = "node-sandbox:26"
+phone_number = "+12402514603"
+tier = "guava-seed"
+replicas = 1
+enable_healthcheck = true

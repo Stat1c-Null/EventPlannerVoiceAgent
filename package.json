@@ -1,0 +1,13 @@
+{
+  "name": "guavahackathonagent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --import tsx main.ts"
+  },
+  "dependencies": {
+    "@guava-ai/guava-sdk": "*",
+    "tsx": "*"
+  }
+}
