@@ -13,7 +13,10 @@ export interface PlanDraft {
   /** Components that already used their one "none of these" re-search. */
   refined: PlanItemKind[];
   redoUsed: boolean;
-  redoing: boolean;
+  /** Component indexes still to re-pick during the one redo; null when not redoing. */
+  redoQueue: number[] | null;
+  /** Bumped for every pick/confirm task so task IDs and field keys never repeat. */
+  attempt: number;
   saved: boolean;
   callerPhone: string | null;
 }
@@ -28,7 +31,8 @@ export function newDraft(callerPhone: string | null): PlanDraft {
     picks: {},
     refined: [],
     redoUsed: false,
-    redoing: false,
+    redoQueue: null,
+    attempt: 0,
     saved: false,
     callerPhone,
   };

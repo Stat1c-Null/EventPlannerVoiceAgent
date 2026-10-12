@@ -21,5 +21,6 @@ export function generateEventId(random: () => number = Math.random): string {
 }
 
 export function normalizeEventId(raw: string): string {
-  return raw.trim().toUpperCase();
+  // Accept the ID the way a caller types what they heard: "blue falcon 42".
+  return raw.trim().replace(/[\s_-]+/g, "-").toUpperCase();
 }

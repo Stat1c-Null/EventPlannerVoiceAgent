@@ -35,6 +35,11 @@ test("normalizeEventId trims and upper-cases", () => {
   assert.equal(normalizeEventId("  blue-falcon-42 "), "BLUE-FALCON-42");
 });
 
+test("normalizeEventId accepts an ID typed the way it was spoken", () => {
+  assert.equal(normalizeEventId("blue falcon 42"), "BLUE-FALCON-42");
+  assert.equal(normalizeEventId("Blue_Falcon - 42"), "BLUE-FALCON-42");
+});
+
 test("create assigns an ID and get returns the same plan, case-insensitively", () => {
   const store = new EventStore(":memory:");
   const saved = store.create(samplePlan());

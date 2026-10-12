@@ -9,8 +9,10 @@ import { buildPlan } from "./plan.ts";
 import { PLAYBOOKS, parseEventType } from "./playbooks.ts";
 import {
   changeChoice,
+  confirmFieldKey,
   confirmTask,
   detailsTask,
+  parseTaskId,
   pickFieldKey,
   pickTask,
   refineFieldKey,
@@ -65,12 +67,18 @@ export function createAgent(deps: AgentDeps): guava.Agent {
     }
     draft.options[component.kind] = options;
     const round = draft.refined.includes(component.kind) ? 2 : 1;
-    await call.setTask(pickTask(component, options, round));
+    draft.attempt += 1;
+    await call.setTask(pickTask(component, options, round, draft.attempt));
   }
 
   async function advance(call: guava.Call, draft: PlanDraft): Promise<void> {
-    if (draft.redoing) {
-      draft.redoing = false;
+    if (draft.redoQueue) {
+      const next = draft.redoQueue.shift();
+      if (next !== undefined) {
+        draft.componentIndex = next;
+        return startPick(call, draft);
+      }
+      draft.redoQueue = null;
       return startConfirm(call, draft);
     }
     draft.componentIndex += 1;
@@ -79,7 +87,8 @@ export function createAgent(deps: AgentDeps): guava.Agent {
 
   async function startConfirm(call: guava.Call, draft: PlanDraft): Promise<void> {
     const changeChoices = draft.redoUsed ? [] : draft.components.map(changeChoice);
-    await call.setTask(confirmTask(summarizeDraft(draft), changeChoices));
+    draft.attempt += 1;
+    await call.setTask(confirmTask(summarizeDraft(draft), changeChoices, draft.attempt));
   }
 
   async function handleTriage(call: guava.Call, draft: PlanDraft): Promise<void> {
@@ -99,7 +108,9 @@ export function createAgent(deps: AgentDeps): guava.Agent {
   async function handleDetails(call: guava.Call, draft: PlanDraft): Promise<void> {
     const playbook = PLAYBOOKS[draft.type ?? "friends"];
     for (const field of playbook.detailFields) {
-      const value = fieldText(await call.getField(field.key));
+      const raw = fieldText(await call.getField(field.key));
+      // Playbooks compare multiple-choice answers against their lower-case choices.
+      const value = field.fieldType === "multiple_choice" ? raw.toLowerCase() : raw;
       if (value) draft.preferences[field.key] = value;
     }
     const partySize = playbook.partySize(draft);
@@ -109,8 +120,13 @@ export function createAgent(deps: AgentDeps): guava.Agent {
     await startPick(call, draft);
   }
 
-  async function handlePick(call: guava.Call, draft: PlanDraft, kind: PlanItemKind): Promise<void> {
-    const choice = fieldText(await call.getField(pickFieldKey(kind))).toLowerCase();
+  async function handlePick(
+    call: guava.Call,
+    draft: PlanDraft,
+    kind: PlanItemKind,
+    attempt: number,
+  ): Promise<void> {
+    const choice = fieldText(await call.getField(pickFieldKey(kind, attempt))).toLowerCase();
     const picked = draft.options[kind]?.find((o) => o.name.trim().toLowerCase() === choice);
     if (picked) {
       draft.picks[kind] = picked;
@@ -118,21 +134,24 @@ export function createAgent(deps: AgentDeps): guava.Agent {
     }
     if (!draft.refined.includes(kind)) {
       draft.refined.push(kind);
-      return startPick(call, draft, fieldText(await call.getField(refineFieldKey(kind))));
+      return startPick(call, draft, fieldText(await call.getField(refineFieldKey(kind, attempt))));
     }
     delete draft.picks[kind];
     return advance(call, draft);
   }
 
-  async function handleConfirm(call: guava.Call, draft: PlanDraft): Promise<void> {
-    const answer = fieldText(await call.getField("confirm_choice")).toLowerCase();
+  async function handleConfirm(call: guava.Call, draft: PlanDraft, attempt: number): Promise<void> {
+    const answer = fieldText(await call.getField(confirmFieldKey(attempt))).toLowerCase();
     const index = draft.components.findIndex((c) => changeChoice(c) === answer);
     if (!draft.redoUsed && index >= 0) {
       const kind = draft.components[index]!.kind;
+      // Components that depend on the redone one (parking near the venue) are re-picked too.
+      const dependents = draft.components.flatMap((c, i) => (c.dependsOn === kind ? [i] : []));
+      const redoKinds = [index, ...dependents].map((i) => draft.components[i]!.kind);
       draft.redoUsed = true;
-      draft.redoing = true;
+      draft.redoQueue = dependents;
       draft.componentIndex = index;
-      draft.refined = draft.refined.filter((k) => k !== kind);
+      draft.refined = draft.refined.filter((k) => !redoKinds.includes(k));
       return startPick(call, draft);
     }
     return finish(call, draft);
@@ -186,10 +205,11 @@ export function createAgent(deps: AgentDeps): guava.Agent {
       logger.warn("No plan draft for call %s (task %s)", call.id, taskId);
       return;
     }
-    if (taskId === "triage") return handleTriage(call, draft);
-    if (taskId.startsWith("details:")) return handleDetails(call, draft);
-    if (taskId.startsWith("pick:")) return handlePick(call, draft, taskId.slice("pick:".length) as PlanItemKind);
-    if (taskId === "confirm") return handleConfirm(call, draft);
+    const { name, attempt } = parseTaskId(taskId);
+    if (name === "triage") return handleTriage(call, draft);
+    if (name.startsWith("details:")) return handleDetails(call, draft);
+    if (name.startsWith("pick:")) return handlePick(call, draft, name.slice("pick:".length) as PlanItemKind, attempt);
+    if (name === "confirm") return handleConfirm(call, draft, attempt);
     logger.warn("Unexpected task %s on call %s", taskId, call.id);
   });
 

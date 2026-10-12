@@ -8,6 +8,7 @@ import {
   changeChoice,
   confirmTask,
   detailsTask,
+  parseTaskId,
   pickFieldKey,
   pickTask,
   refineFieldKey,
@@ -83,29 +84,43 @@ test("party size: 2 for a date, from answers for friends and business", () => {
 
 test("pickTask round 1 offers names plus 'none of these' and a refinement field", () => {
   const dinner = PLAYBOOKS.date.components[0]!;
-  const task = pickTask(dinner, [place("A"), place("B")], 1);
-  assert.equal(task.taskId, "pick:dinner");
+  const task = pickTask(dinner, [place("A"), place("B")], 1, 3);
+  assert.equal(task.taskId, "pick:dinner#3");
   const [choice, refine] = fields(task.checklist);
-  assert.equal(choice?.key, pickFieldKey("dinner"));
+  assert.equal(choice?.key, pickFieldKey("dinner", 3));
   assert.deepEqual(choice?.choices, ["A", "B", NONE_OF_THESE]);
-  assert.equal(refine?.key, refineFieldKey("dinner"));
+  assert.equal(refine?.key, refineFieldKey("dinner", 3));
   assert.ok(task.objective?.includes("A address"));
   assert.ok(!task.objective?.includes("sample"));
 });
 
 test("pickTask round 2 has no refinement field; sample results are disclosed", () => {
   const dinner = PLAYBOOKS.date.components[0]!;
-  const task = pickTask(dinner, [place("A", { sample: true })], 2);
-  assert.deepEqual(fields(task.checklist).map((f) => f.key), [pickFieldKey("dinner")]);
+  const task = pickTask(dinner, [place("A", { sample: true })], 2, 4);
+  assert.deepEqual(fields(task.checklist).map((f) => f.key), [pickFieldKey("dinner", 4)]);
   assert.ok(task.objective?.includes("sample"));
 });
 
 test("confirmTask offers 'looks good' plus the change choices", () => {
   const dinner = PLAYBOOKS.date.components[0]!;
-  const task = confirmTask("summary text", [changeChoice(dinner)]);
-  assert.equal(task.taskId, "confirm");
+  const task = confirmTask("summary text", [changeChoice(dinner)], 5);
+  assert.equal(task.taskId, "confirm#5");
   assert.deepEqual(fields(task.checklist)[0]?.choices, [LOOKS_GOOD, "change the dinner spot"]);
   assert.ok(task.objective?.includes("summary text"));
+});
+
+test("parseTaskId splits the attempt suffix off pick and confirm task IDs", () => {
+  assert.deepEqual(parseTaskId("pick:dinner#3"), { name: "pick:dinner", attempt: 3 });
+  assert.deepEqual(parseTaskId("confirm#7"), { name: "confirm", attempt: 7 });
+  assert.deepEqual(parseTaskId("triage"), { name: "triage", attempt: 0 });
+});
+
+test("every playbook's parking depends on its primary component", () => {
+  const dependsOn = (type: "date" | "friends" | "business") =>
+    PLAYBOOKS[type].components.find((c) => c.kind === "parking")?.dependsOn;
+  assert.equal(dependsOn("date"), "dinner");
+  assert.equal(dependsOn("friends"), "activity");
+  assert.equal(dependsOn("business"), "venue");
 });
 
 test("summarizeDraft lists picks and skipped components", () => {

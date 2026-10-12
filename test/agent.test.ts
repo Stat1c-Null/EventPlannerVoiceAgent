@@ -10,8 +10,11 @@ type SetTask = { command_type: "set-task"; task_id: string; objective: string; a
 type AnyCommand = { command_type: string; instruction?: string };
 
 const commands = (call: MockCall) => call.commands as unknown as AnyCommand[];
-const lastTask = (call: MockCall): SetTask =>
-  commands(call).filter((c) => c.command_type === "set-task").at(-1) as unknown as SetTask;
+const tasks = (call: MockCall): SetTask[] =>
+  commands(call).filter((c) => c.command_type === "set-task") as unknown as SetTask[];
+const lastTask = (call: MockCall): SetTask => tasks(call).at(-1)!;
+/** Task IDs carry a per-attempt suffix ("pick:dinner#3"); compare on the name before it. */
+const lastTaskName = (call: MockCall): string => lastTask(call).task_id.split("#")[0]!;
 const instructions = (call: MockCall): string[] =>
   commands(call).flatMap((c) => (c.command_type === "send-instruction" && c.instruction ? [c.instruction] : []));
 
@@ -47,6 +50,22 @@ async function complete(agent: guava.Agent, call: MockCall, taskId: string, fiel
   await agent.handlers.onTaskComplete(taskId, call);
 }
 
+/** Answer the current pick or confirm task: its first field gets `choice`, its second (if any) `refine`. */
+async function answer(agent: guava.Agent, call: MockCall, choice: string, refine?: string) {
+  const task = lastTask(call);
+  const [choiceKey, refineKey] = task.action_items.map((item) => item.key!);
+  call.setField(choiceKey!, choice);
+  if (refine !== undefined && refineKey) call.setField(refineKey, refine);
+  await agent.handlers.onTaskComplete(task.task_id, call);
+}
+
+async function pickFirstOfEach(agent: guava.Agent, call: MockCall, kinds: string[]) {
+  for (const kind of kinds) {
+    assert.equal(lastTaskName(call), `pick:${kind}`);
+    await answer(agent, call, `${kind} one`);
+  }
+}
+
 async function throughDetails(agent: guava.Agent, call: MockCall, type: string, details: Record<string, unknown>) {
   await agent.handlers.onCallStart(call);
   await complete(agent, call, "triage", { event_type: type, event_datetime: "2026-10-20T19:00", area: "Austin, TX", budget: "$300" });
@@ -70,13 +89,10 @@ test("a date with a gift runs triage → details → 4 picks → confirm → sav
     occasion: "anniversary", food_preferences: "italian", vibe: "romantic", wants_gift: "yes", gift_interests: "books",
   });
 
-  for (const kind of ["dinner", "activity", "parking", "gift"]) {
-    assert.equal(lastTask(call).task_id, `pick:${kind}`);
-    await complete(agent, call, `pick:${kind}`, { [`pick_${kind}`]: `${kind} one` });
-  }
+  await pickFirstOfEach(agent, call, ["dinner", "activity", "parking", "gift"]);
 
-  assert.equal(lastTask(call).task_id, "confirm");
-  await complete(agent, call, "confirm", { confirm_choice: "looks good" });
+  assert.equal(lastTaskName(call), "confirm");
+  await answer(agent, call, "looks good");
 
   assert.equal(created.length, 1);
   const plan = created[0]!;
@@ -101,10 +117,10 @@ test("parking is searched near the chosen primary venue", async () => {
   const { agent, searches } = setup();
   const call = phoneCall();
   await throughDetails(agent, call, "business event", { headcount: 12, purpose: "client dinner", room_needs: "projector" });
-  assert.equal(lastTask(call).task_id, "pick:venue");
-  await complete(agent, call, "pick:venue", { pick_venue: "venue two" });
-  await complete(agent, call, "pick:catering", { pick_catering: "catering one" });
-  assert.equal(lastTask(call).task_id, "pick:parking");
+  assert.equal(lastTaskName(call), "pick:venue");
+  await answer(agent, call, "venue two");
+  await answer(agent, call, "catering one");
+  assert.equal(lastTaskName(call), "pick:parking");
   assert.equal(searches.at(-1)!.text, "parking near 2 venue St");
 });
 
@@ -112,10 +128,8 @@ test("business events never ask about a gift and use headcount as party size", a
   const { agent, created } = setup();
   const call = phoneCall();
   await throughDetails(agent, call, "business event", { headcount: 12, purpose: "offsite", room_needs: "private room" });
-  for (const kind of ["venue", "catering", "parking"]) {
-    await complete(agent, call, `pick:${kind}`, { [`pick_${kind}`]: `${kind} one` });
-  }
-  await complete(agent, call, "confirm", { confirm_choice: "looks good" });
+  await pickFirstOfEach(agent, call, ["venue", "catering", "parking"]);
+  await answer(agent, call, "looks good");
   assert.deepEqual(created[0]!.items.map((i) => i.kind), ["venue", "catering", "parking"]);
   assert.equal(created[0]!.basics.partySize, 12);
 });
@@ -124,19 +138,18 @@ test("'none of these' re-searches once with the refinement, then a second 'none'
   const { agent, searches, created } = setup();
   const call = phoneCall();
   await throughDetails(agent, call, "friends hangout", { group_size: 6, vibe: "games" });
-  assert.equal(lastTask(call).task_id, "pick:activity");
+  assert.equal(lastTaskName(call), "pick:activity");
 
-  await complete(agent, call, "pick:activity", { pick_activity: "none of these", refine_activity: "something with karaoke" });
-  assert.equal(lastTask(call).task_id, "pick:activity");
+  await answer(agent, call, "none of these", "something with karaoke");
+  assert.equal(lastTaskName(call), "pick:activity");
   assert.ok(searches.at(-1)!.text.endsWith("something with karaoke"));
-  assert.deepEqual(lastTask(call).action_items.map((i) => i.key), ["pick_activity"]);
+  assert.equal(lastTask(call).action_items.length, 1);
 
-  await complete(agent, call, "pick:activity", { pick_activity: "none of these" });
-  assert.equal(lastTask(call).task_id, "pick:food");
+  await answer(agent, call, "none of these");
+  assert.equal(lastTaskName(call), "pick:food");
 
-  await complete(agent, call, "pick:food", { pick_food: "food one" });
-  await complete(agent, call, "pick:parking", { pick_parking: "parking one" });
-  await complete(agent, call, "confirm", { confirm_choice: "looks good" });
+  await pickFirstOfEach(agent, call, ["food", "parking"]);
+  await answer(agent, call, "looks good");
   assert.deepEqual(created[0]!.items.map((i) => i.kind), ["food", "parking"]);
 });
 
@@ -146,8 +159,8 @@ test("a component with zero real results is skipped with a spoken note", async (
   });
   const call = phoneCall();
   await throughDetails(agent, call, "date", { vibe: "casual", wants_gift: "no" });
-  await complete(agent, call, "pick:dinner", { pick_dinner: "x" });
-  assert.equal(lastTask(call).task_id, "pick:parking");
+  await answer(agent, call, "x");
+  assert.equal(lastTaskName(call), "pick:parking");
   assert.ok(instructions(call).some((i) => i.includes("date activity")));
 });
 
@@ -155,28 +168,87 @@ test("confirm allows exactly one redo, then only 'looks good'", async () => {
   const { agent, created } = setup();
   const call = phoneCall();
   await throughDetails(agent, call, "date", { vibe: "romantic", wants_gift: "no" });
-  for (const kind of ["dinner", "activity", "parking"]) {
-    await complete(agent, call, `pick:${kind}`, { [`pick_${kind}`]: `${kind} one` });
-  }
+  await pickFirstOfEach(agent, call, ["dinner", "activity", "parking"]);
   assert.deepEqual(lastTask(call).action_items[0]!.choices, [
     "looks good", "change the dinner spot", "change the date activity", "change the parking spot",
   ]);
 
-  await complete(agent, call, "confirm", { confirm_choice: "change the dinner spot" });
-  assert.equal(lastTask(call).task_id, "pick:dinner");
-  await complete(agent, call, "pick:dinner", { pick_dinner: "dinner two" });
+  await answer(agent, call, "change the date activity");
+  assert.equal(lastTaskName(call), "pick:activity");
+  await answer(agent, call, "activity two");
 
-  assert.equal(lastTask(call).task_id, "confirm");
+  assert.equal(lastTaskName(call), "confirm");
   assert.deepEqual(lastTask(call).action_items[0]!.choices, ["looks good"]);
-  await complete(agent, call, "confirm", { confirm_choice: "looks good" });
-  assert.equal(created[0]!.items[0]!.name, "dinner two");
+  await answer(agent, call, "looks good");
+  assert.equal(created[0]!.items[1]!.name, "activity two");
+});
+
+test("redoing the dinner also re-picks parking near the new dinner spot", async () => {
+  const { agent, created, searches } = setup();
+  const call = phoneCall();
+  await throughDetails(agent, call, "date", { vibe: "romantic", wants_gift: "no" });
+  await pickFirstOfEach(agent, call, ["dinner", "activity", "parking"]);
+
+  await answer(agent, call, "change the dinner spot");
+  assert.equal(lastTaskName(call), "pick:dinner");
+  await answer(agent, call, "dinner two");
+
+  assert.equal(lastTaskName(call), "pick:parking");
+  assert.equal(searches.at(-1)!.text, "parking near 2 dinner St");
+  await answer(agent, call, "parking two");
+
+  assert.equal(lastTaskName(call), "confirm");
+  assert.deepEqual(lastTask(call).action_items[0]!.choices, ["looks good"]);
+  await answer(agent, call, "looks good");
+  assert.deepEqual(
+    created[0]!.items.map((i) => i.name),
+    ["dinner two", "activity one", "parking two"],
+  );
+});
+
+test("every pick and confirm attempt gets a fresh task ID and fresh field keys", async () => {
+  const { agent } = setup();
+  const call = phoneCall();
+  await throughDetails(agent, call, "friends hangout", { group_size: 4, vibe: "bars" });
+  await answer(agent, call, "none of these", "rooftop");
+  await pickFirstOfEach(agent, call, ["activity", "food", "parking"]);
+  await answer(agent, call, "change the food spot");
+  await answer(agent, call, "food two");
+
+  const attempts = tasks(call).filter((t) => t.task_id !== "triage" && !t.task_id.startsWith("details:"));
+  const ids = attempts.map((t) => t.task_id);
+  const keys = attempts.flatMap((t) => t.action_items.map((i) => i.key));
+  assert.equal(new Set(ids).size, ids.length, `task IDs repeat: ${ids.join(", ")}`);
+  assert.equal(new Set(keys).size, keys.length, `field keys repeat: ${keys.join(", ")}`);
+});
+
+test("a redo ignores the refinement given in an earlier attempt", async () => {
+  const { agent, searches } = setup();
+  const call = phoneCall();
+  await throughDetails(agent, call, "friends hangout", { group_size: 4, vibe: "bars" });
+  await answer(agent, call, "none of these", "rooftop");
+  await pickFirstOfEach(agent, call, ["activity", "food", "parking"]);
+
+  await answer(agent, call, "change the group activity");
+  await answer(agent, call, "none of these");
+  assert.equal(lastTaskName(call), "pick:activity");
+  assert.ok(!searches.at(-1)!.text.includes("rooftop"), searches.at(-1)!.text);
+});
+
+test("multiple-choice detail answers are matched regardless of case", async () => {
+  const { agent, searches } = setup();
+  const call = phoneCall();
+  await throughDetails(agent, call, "date", { vibe: "Romantic", wants_gift: "Yes", gift_interests: "books" });
+  assert.equal(searches[0]!.text.startsWith("romantic restaurant"), true, searches[0]!.text);
+  await pickFirstOfEach(agent, call, ["dinner", "activity", "parking", "gift"]);
+  assert.equal(lastTaskName(call), "confirm");
 });
 
 test("a dropped call saves one incomplete plan; a finished call is not saved twice", async () => {
   const dropped = setup();
   const droppedCall = phoneCall();
   await throughDetails(dropped.agent, droppedCall, "date", { vibe: "casual", wants_gift: "no" });
-  await complete(dropped.agent, droppedCall, "pick:dinner", { pick_dinner: "dinner one" });
+  await answer(dropped.agent, droppedCall, "dinner one");
   await dropped.agent.handlers.onSessionEnd(droppedCall, endEvent);
   assert.equal(dropped.created.length, 1);
   assert.equal(dropped.created[0]!.status, "incomplete");
@@ -186,10 +258,8 @@ test("a dropped call saves one incomplete plan; a finished call is not saved twi
   const finished = setup();
   const call = phoneCall();
   await throughDetails(finished.agent, call, "date", { vibe: "casual", wants_gift: "no" });
-  for (const kind of ["dinner", "activity", "parking"]) {
-    await complete(finished.agent, call, `pick:${kind}`, { [`pick_${kind}`]: `${kind} one` });
-  }
-  await complete(finished.agent, call, "confirm", { confirm_choice: "looks good" });
+  await pickFirstOfEach(finished.agent, call, ["dinner", "activity", "parking"]);
+  await answer(finished.agent, call, "looks good");
   await finished.agent.handlers.onSessionEnd(call, endEvent);
   assert.equal(finished.created.length, 1);
 });
@@ -206,10 +276,8 @@ test("SMS failure still ends the call with the spoken ID and link", async () => 
   const { agent } = setup({ sms: { sendSms: async () => { throw new Error("SMS not enabled"); } } });
   const call = phoneCall();
   await throughDetails(agent, call, "friends hangout", { group_size: 4, vibe: "bars" });
-  for (const kind of ["activity", "food", "parking"]) {
-    await complete(agent, call, `pick:${kind}`, { [`pick_${kind}`]: `${kind} one` });
-  }
-  await complete(agent, call, "confirm", { confirm_choice: "looks good" });
+  await pickFirstOfEach(agent, call, ["activity", "food", "parking"]);
+  await answer(agent, call, "looks good");
   const goodbye = instructions(call).at(-1)!;
   assert.ok(goodbye.includes("BLUE-FALCON-42"));
   assert.ok(goodbye.includes("http://localhost:3000/e/BLUE-FALCON-42"));
@@ -220,10 +288,8 @@ test("a WebRTC call has no caller number, so no SMS is attempted", async () => {
   const { agent, sent, created } = setup();
   const call = new MockCall({ callInfo: { call_type: "webrtc", webrtc_code: "abc" } });
   await throughDetails(agent, call, "friends hangout", { group_size: 4, vibe: "outdoors" });
-  for (const kind of ["activity", "food", "parking"]) {
-    await complete(agent, call, `pick:${kind}`, { [`pick_${kind}`]: `${kind} one` });
-  }
-  await complete(agent, call, "confirm", { confirm_choice: "looks good" });
+  await pickFirstOfEach(agent, call, ["activity", "food", "parking"]);
+  await answer(agent, call, "looks good");
   assert.equal(sent.length, 0);
   assert.equal(created[0]!.callerPhone, undefined);
 });
@@ -232,10 +298,8 @@ test("a DB failure ends the call honestly with no event ID and no SMS", async ()
   const { agent, sent } = setup({ store: { create: () => { throw new Error("disk full"); } } });
   const call = phoneCall();
   await throughDetails(agent, call, "friends hangout", { group_size: 4, vibe: "bars" });
-  for (const kind of ["activity", "food", "parking"]) {
-    await complete(agent, call, `pick:${kind}`, { [`pick_${kind}`]: `${kind} one` });
-  }
-  await complete(agent, call, "confirm", { confirm_choice: "looks good" });
+  await pickFirstOfEach(agent, call, ["activity", "food", "parking"]);
+  await answer(agent, call, "looks good");
   const goodbye = instructions(call).at(-1)!;
   assert.ok(goodbye.toLowerCase().includes("couldn't be saved"));
   assert.ok(!goodbye.includes("BLUE-FALCON-42"));

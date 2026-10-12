@@ -8,9 +8,18 @@ export type TaskArgs = Parameters<guava.Call["setTask"]>[0];
 export const NONE_OF_THESE = "none of these";
 export const LOOKS_GOOD = "looks good";
 
-export const pickFieldKey = (kind: PlanItemKind): string => `pick_${kind}`;
-export const refineFieldKey = (kind: PlanItemKind): string => `refine_${kind}`;
+// Pick and confirm tasks can run more than once per call (re-search, redo). Each attempt gets
+// its own task ID and field keys because the SDK keeps one field map for the whole call.
+export const pickFieldKey = (kind: PlanItemKind, attempt: number): string => `pick_${kind}_${attempt}`;
+export const refineFieldKey = (kind: PlanItemKind, attempt: number): string => `refine_${kind}_${attempt}`;
+export const confirmFieldKey = (attempt: number): string => `confirm_choice_${attempt}`;
 export const changeChoice = (component: ComponentSpec): string => `change the ${component.label}`;
+
+/** Splits "pick:dinner#3" into its name ("pick:dinner") and attempt (3). */
+export function parseTaskId(taskId: string): { name: string; attempt: number } {
+  const [name = "", attempt = "0"] = taskId.split("#");
+  return { name, attempt: Number(attempt) };
+}
 
 export function triageTask(): TaskArgs {
   return {
@@ -48,20 +57,25 @@ export function detailsTask(playbook: Playbook): TaskArgs {
   };
 }
 
-export function pickTask(component: ComponentSpec, options: PlaceResult[], round: 1 | 2): TaskArgs {
+export function pickTask(
+  component: ComponentSpec,
+  options: PlaceResult[],
+  round: 1 | 2,
+  attempt: number,
+): TaskArgs {
   const optionList = options.map((o, i) => `${i + 1}. ${o.name} — ${o.address}`).join("\n");
   const sampleNote = options.some((o) => o.sample)
     ? " These are sample suggestions, not real places, so tell the caller that."
     : "";
   const noneMeaning = round === 1 ? "they don't like any of them" : `they want to skip the ${component.label}`;
   return {
-    taskId: `pick:${component.kind}`,
+    taskId: `pick:${component.kind}#${attempt}`,
     objective:
       `Help the caller choose a ${component.label}. Briefly describe each option by name and area.${sampleNote}\n` +
       `Options:\n${optionList}`,
     checklist: [
       guava.Field({
-        key: pickFieldKey(component.kind),
+        key: pickFieldKey(component.kind, attempt),
         fieldType: "multiple_choice",
         choices: [...options.map((o) => o.name), NONE_OF_THESE],
         description: `Which ${component.label} they want. Choose "${NONE_OF_THESE}" if ${noneMeaning}.`,
@@ -69,7 +83,7 @@ export function pickTask(component: ComponentSpec, options: PlaceResult[], round
       ...(round === 1
         ? [
             guava.Field({
-              key: refineFieldKey(component.kind),
+              key: refineFieldKey(component.kind, attempt),
               fieldType: "text",
               required: false,
               description: `Only if they chose "${NONE_OF_THESE}": what they would prefer instead.`,
@@ -80,13 +94,13 @@ export function pickTask(component: ComponentSpec, options: PlaceResult[], round
   };
 }
 
-export function confirmTask(summary: string, changeChoices: string[]): TaskArgs {
+export function confirmTask(summary: string, changeChoices: string[], attempt: number): TaskArgs {
   return {
-    taskId: "confirm",
+    taskId: `confirm#${attempt}`,
     objective: `Read this plan back to the caller in a natural way and ask whether it looks good.\n${summary}`,
     checklist: [
       guava.Field({
-        key: "confirm_choice",
+        key: confirmFieldKey(attempt),
         fieldType: "multiple_choice",
         choices: [LOOKS_GOOD, ...changeChoices],
         description: "Whether the plan looks good, or which one part they want to change.",
