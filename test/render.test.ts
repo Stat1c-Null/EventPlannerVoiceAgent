@@ -114,6 +114,27 @@ test("renderPlan formats a Guava datetime object saved as JSON by older plans", 
   assert.ok(!html.includes("&quot;day&quot;"));
 });
 
+test("renderPlan shows a budget saved as text as a dollar amount", () => {
+  const html = renderPlan(plan({ basics: { when: "2026-10-18T18:00", area: "Atlanta", budget: "about 200 dollars" } }), "x");
+  assert.ok(html.includes("<dd>$200</dd>"));
+});
+
+test("renderPlan puts the share link and copy button together in a centered share section", () => {
+  const link = "http://localhost:3000/e/BLUE-FALCON-42";
+  const html = renderPlan(plan(), link);
+  const share = /<section class="share">([\s\S]*?)<\/section>/.exec(html)?.[1] ?? "";
+  assert.ok(share.includes(`<a class="share-link" href="${link}">`), share);
+  assert.ok(share.includes('id="copy"'), share);
+  assert.ok(/\.share\{[^}]*align-items:center/.test(html), "share section should center its contents");
+  assert.ok(/\.share\{[^}]*margin:\s*40px/.test(html), "share section should be spaced away from the cards");
+});
+
+test("the page uses the purple accent instead of orange", () => {
+  const html = renderPlan(plan(), "x");
+  assert.ok(html.includes("--accent:#7c3aed"));
+  assert.ok(!html.includes("#c2410c"));
+});
+
 test("renderPlan omits the group and budget tiles when unknown", () => {
   const html = renderPlan(plan({ basics: { when: "2026-10-18T18:00", area: "Atlanta" } }), "x");
   assert.ok(!html.includes("<dt>Group</dt>"));

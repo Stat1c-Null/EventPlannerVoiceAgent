@@ -36,7 +36,12 @@ export function triageTask(): TaskArgs {
       }),
       guava.Field({ key: "event_datetime", fieldType: "datetime", description: "When the event starts, date and time." }),
       guava.Field({ key: "area", fieldType: "text", description: "The city or neighborhood where it should happen." }),
-      guava.Field({ key: "budget", fieldType: "text", required: false, description: "Their rough budget for the whole event, if they have one." }),
+      guava.Field({
+        key: "budget",
+        fieldType: "integer",
+        required: false,
+        description: "Their rough budget for the whole event in US dollars, as a number, if they have one.",
+      }),
     ],
   };
 }

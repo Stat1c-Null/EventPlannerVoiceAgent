@@ -41,6 +41,7 @@ test("triageTask asks for type, datetime, area, and optional budget", () => {
   assert.equal(byKey.event_datetime?.field_type, "datetime");
   assert.equal(byKey.area?.field_type, "text");
   assert.equal(byKey.budget?.required, false);
+  assert.equal(byKey.budget?.field_type, "integer");
 });
 
 test("each playbook's details task asks only that playbook's questions", () => {

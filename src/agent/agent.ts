@@ -1,6 +1,7 @@
 import * as guava from "@guava-ai/guava-sdk";
 import { shareUrl } from "../config.ts";
 import { toLocalIso } from "../datetime.ts";
+import { formatUsd } from "../money.ts";
 import type { PlacesQuery } from "../services/places.ts";
 import { sendShareLink, type SmsSender } from "../services/sms.ts";
 import type { EventStore } from "../store/events.ts";
@@ -106,7 +107,8 @@ export function createAgent(deps: AgentDeps): guava.Agent {
     const type = parseEventType(rawType);
     if (!type) logger.warn("Unknown event type %s; using friends playbook", rawType);
     draft.type = type ?? "friends";
-    const budget = fieldText(await call.getField("budget"));
+    const rawBudget = await call.getField("budget");
+    const budget = formatUsd(rawBudget) ?? fieldText(rawBudget);
     const when = await call.getField("event_datetime");
     draft.basics = {
       when: toLocalIso(when) ?? fieldText(when),

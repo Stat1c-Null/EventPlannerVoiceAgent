@@ -138,6 +138,17 @@ test("Guava's datetime object is saved as a readable local ISO time", async () =
   assert.equal(created[0]!.items[0]!.time, "2026-10-18T18:00");
 });
 
+test("the budget is saved as a dollar amount", async () => {
+  const { agent, created } = setup();
+  const call = phoneCall();
+  await agent.handlers.onCallStart(call);
+  await complete(agent, call, "triage", { event_type: "date", event_datetime: "2026-10-20T19:00", area: "Austin, TX", budget: 2000 });
+  await complete(agent, call, "details:date", { vibe: "casual", wants_gift: "no" });
+  await pickFirstOfEach(agent, call, ["dinner", "activity", "parking"]);
+  await answer(agent, call, "looks good");
+  assert.equal(created[0]!.basics.budget, "$2,000");
+});
+
 test("the agent never hangs up until the caller confirms, and repeats the ID on request", async () => {
   const { agent } = setup();
   const call = phoneCall();
