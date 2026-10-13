@@ -57,7 +57,12 @@ export function createAgent(deps: AgentDeps): guava.Agent {
     if (!component) return startConfirm(call, draft);
 
     const text = cleanQuery(`${component.query(draft)} ${refinement}`);
-    const options = await deps.search({ text, kind: component.kind, area: draft.basics.area ?? "" });
+    const options = await deps.search({
+      text,
+      kind: component.kind,
+      area: draft.basics.area ?? "",
+      ...(component.placeType ? { includedType: component.placeType } : {}),
+    });
     if (options.length === 0) {
       await call.sendInstruction(
         `Tell the caller you couldn't find a good ${component.label} for them, so you're skipping it.`,

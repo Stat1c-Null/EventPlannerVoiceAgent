@@ -122,6 +122,8 @@ test("parking is searched near the chosen primary venue", async () => {
   await answer(agent, call, "catering one");
   assert.equal(lastTaskName(call), "pick:parking");
   assert.equal(searches.at(-1)!.text, "parking near 2 venue St");
+  assert.equal(searches.at(-1)!.includedType, "parking");
+  assert.equal(searches[0]!.includedType, undefined);
 });
 
 test("business events never ask about a gift and use headcount as party size", async () => {

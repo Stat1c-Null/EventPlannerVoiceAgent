@@ -16,6 +16,8 @@ export interface ComponentSpec {
   includeWhen?: (draft: PlanDraft) => boolean;
   /** Re-pick this component whenever the component it depends on is redone. */
   dependsOn?: PlanItemKind;
+  /** Google place type that results must have, e.g. "parking". */
+  placeType?: string;
   query: (draft: PlanDraft) => string;
 }
 
@@ -77,7 +79,7 @@ export const PLAYBOOKS: Record<EventType, Playbook> = {
     components: [
       { kind: "dinner", label: "dinner spot", query: (d) => `${pref(d, "vibe", "romantic")} restaurant ${pref(d, "food_preferences")} in ${area(d)}` },
       { kind: "activity", label: "date activity", query: (d) => `${pref(d, "vibe", "fun")} date night activity in ${area(d)}` },
-      { kind: "parking", label: "parking spot", dependsOn: "dinner", query: parkingNear("dinner") },
+      { kind: "parking", label: "parking spot", dependsOn: "dinner", placeType: "parking", query: parkingNear("dinner") },
       {
         kind: "gift",
         label: "gift shop",
@@ -100,7 +102,7 @@ export const PLAYBOOKS: Record<EventType, Playbook> = {
     components: [
       { kind: "activity", label: "group activity", query: (d) => `${FRIENDS_ACTIVITY[pref(d, "vibe")] ?? "fun group activity"} for groups in ${area(d)}` },
       { kind: "food", label: "food spot", query: (d) => `group friendly restaurant ${pref(d, "dietary")} in ${area(d)}` },
-      { kind: "parking", label: "parking spot", dependsOn: "activity", query: parkingNear("activity") },
+      { kind: "parking", label: "parking spot", dependsOn: "activity", placeType: "parking", query: parkingNear("activity") },
     ],
   },
   business: {
@@ -118,7 +120,7 @@ export const PLAYBOOKS: Record<EventType, Playbook> = {
     components: [
       { kind: "venue", label: "venue", query: (d) => `meeting venue with ${pref(d, "room_needs", "private room")} for ${pref(d, "headcount", "a group of")} people in ${area(d)}` },
       { kind: "catering", label: "caterer", query: (d) => `corporate catering ${pref(d, "dietary")} in ${area(d)}` },
-      { kind: "parking", label: "parking spot", dependsOn: "venue", query: parkingNear("venue") },
+      { kind: "parking", label: "parking spot", dependsOn: "venue", placeType: "parking", query: parkingNear("venue") },
     ],
   },
 };

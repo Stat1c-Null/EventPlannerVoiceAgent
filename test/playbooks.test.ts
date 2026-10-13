@@ -123,6 +123,18 @@ test("every playbook's parking depends on its primary component", () => {
   assert.equal(dependsOn("business"), "venue");
 });
 
+test("only parking components restrict their search to a place type", () => {
+  for (const playbook of Object.values(PLAYBOOKS)) {
+    for (const component of playbook.components) {
+      assert.equal(
+        component.placeType,
+        component.kind === "parking" ? "parking" : undefined,
+        `${playbook.type}/${component.kind}`,
+      );
+    }
+  }
+});
+
 test("summarizeDraft lists picks and skipped components", () => {
   const draft = newDraft(null);
   draft.basics = { when: "Friday 7pm", area: "Austin, TX" };

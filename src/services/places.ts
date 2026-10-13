@@ -10,6 +10,8 @@ export interface PlacesQuery {
   text: string;
   kind: PlanItemKind;
   area: string;
+  /** Google place type (Table A) that every result must have, e.g. "parking". */
+  includedType?: string;
 }
 
 export interface PlacesOptions {
@@ -33,7 +35,12 @@ export async function searchPlaces(
         "X-Goog-Api-Key": options.apiKey,
         "X-Goog-FieldMask": PLACES_FIELD_MASK,
       },
-      body: JSON.stringify({ textQuery: query.text, pageSize: RESULT_LIMIT }),
+      body: JSON.stringify({
+        textQuery: query.text,
+        pageSize: RESULT_LIMIT,
+        // includedType alone only biases results; strict filtering drops other place types.
+        ...(query.includedType ? { includedType: query.includedType, strictTypeFiltering: true } : {}),
+      }),
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     });
     if (!response.ok) {

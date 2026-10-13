@@ -54,6 +54,24 @@ test("sends the documented request and parses the response", async () => {
   ]);
 });
 
+test("a query with a place type restricts results to that type", async () => {
+  let body: unknown;
+  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return jsonResponse({ places: [] });
+  }) as typeof fetch;
+  await searchPlaces(
+    { text: "parking near 1 Main St", kind: "parking", area: "Austin, TX", includedType: "parking" },
+    { apiKey: "k", fetchImpl },
+  );
+  assert.deepEqual(body, {
+    textQuery: "parking near 1 Main St",
+    pageSize: 3,
+    includedType: "parking",
+    strictTypeFiltering: true,
+  });
+});
+
 test("a non-2xx response falls back to samples and reports the error", async () => {
   const errors: unknown[] = [];
   const fetchImpl = (async () => jsonResponse({ error: "denied" }, 403)) as typeof fetch;
