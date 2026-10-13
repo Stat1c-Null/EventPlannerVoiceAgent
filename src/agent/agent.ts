@@ -64,13 +64,20 @@ export function createAgent(deps: AgentDeps): guava.Agent {
     const component = draft.components[draft.componentIndex];
     if (!component) return startConfirm(call, draft);
 
-    const text = cleanQuery(`${component.query(draft)} ${refinement}`);
-    const options = await deps.search({
-      text,
+    const base = {
       kind: component.kind,
       area: draft.basics.area ?? "",
       ...(component.placeType ? { includedType: component.placeType } : {}),
-    });
+    };
+    // Prefer places right next to the earlier pick (parking by the venue); fall back to the
+    // address-based query when that pick has no coordinates or nothing is that close.
+    const center = component.nearby?.center(draft);
+    let options = center
+      ? await deps.search({ ...base, text: cleanQuery(`${component.nearby!.text} ${refinement}`), near: center })
+      : [];
+    if (options.length === 0) {
+      options = await deps.search({ ...base, text: cleanQuery(`${component.query(draft)} ${refinement}`) });
+    }
     if (options.length === 0) {
       await call.sendInstruction(
         `Tell the caller you couldn't find a good ${component.label} for them, so you're skipping it.`,

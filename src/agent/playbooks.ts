@@ -1,4 +1,4 @@
-import type { EventType, PlanItemKind } from "../types.ts";
+import type { EventType, LatLng, PlanItemKind } from "../types.ts";
 import type { PlanDraft } from "./draft.ts";
 
 export interface FieldSpec {
@@ -18,6 +18,11 @@ export interface ComponentSpec {
   dependsOn?: PlanItemKind;
   /** Google place type that results must have, e.g. "parking". */
   placeType?: string;
+  /**
+   * Search close to a point first: `text` (a plain category) within a small area around
+   * `center`. Falls back to `query` when there is no center or nothing nearby.
+   */
+  nearby?: { text: string; center: (draft: PlanDraft) => LatLng | undefined };
   query: (draft: PlanDraft) => string;
 }
 
@@ -51,6 +56,11 @@ const area = (draft: PlanDraft): string => draft.basics.area ?? "";
 const parkingNear = (kind: PlanItemKind) => (draft: PlanDraft): string =>
   `parking near ${draft.picks[kind]?.address ?? area(draft)}`;
 
+const parkingAround = (kind: PlanItemKind) => ({
+  text: "parking",
+  center: (draft: PlanDraft): LatLng | undefined => draft.picks[kind]?.location,
+});
+
 const positiveInt = (raw: string | undefined): number | undefined => {
   const value = Number.parseInt(raw ?? "", 10);
   return Number.isInteger(value) && value > 0 ? value : undefined;
@@ -79,7 +89,7 @@ export const PLAYBOOKS: Record<EventType, Playbook> = {
     components: [
       { kind: "dinner", label: "dinner spot", query: (d) => `${pref(d, "vibe", "romantic")} restaurant ${pref(d, "food_preferences")} in ${area(d)}` },
       { kind: "activity", label: "date activity", query: (d) => `${pref(d, "vibe", "fun")} date night activity in ${area(d)}` },
-      { kind: "parking", label: "parking spot", dependsOn: "dinner", placeType: "parking", query: parkingNear("dinner") },
+      { kind: "parking", label: "parking spot", dependsOn: "dinner", placeType: "parking", nearby: parkingAround("dinner"), query: parkingNear("dinner") },
       {
         kind: "gift",
         label: "gift shop",
@@ -102,7 +112,7 @@ export const PLAYBOOKS: Record<EventType, Playbook> = {
     components: [
       { kind: "activity", label: "group activity", query: (d) => `${FRIENDS_ACTIVITY[pref(d, "vibe")] ?? "fun group activity"} for groups in ${area(d)}` },
       { kind: "food", label: "food spot", query: (d) => `group friendly restaurant ${pref(d, "dietary")} in ${area(d)}` },
-      { kind: "parking", label: "parking spot", dependsOn: "activity", placeType: "parking", query: parkingNear("activity") },
+      { kind: "parking", label: "parking spot", dependsOn: "activity", placeType: "parking", nearby: parkingAround("activity"), query: parkingNear("activity") },
     ],
   },
   business: {
@@ -120,7 +130,7 @@ export const PLAYBOOKS: Record<EventType, Playbook> = {
     components: [
       { kind: "venue", label: "venue", query: (d) => `meeting venue with ${pref(d, "room_needs", "private room")} for ${pref(d, "headcount", "a group of")} people in ${area(d)}` },
       { kind: "catering", label: "caterer", query: (d) => `corporate catering ${pref(d, "dietary")} in ${area(d)}` },
-      { kind: "parking", label: "parking spot", dependsOn: "venue", placeType: "parking", query: parkingNear("venue") },
+      { kind: "parking", label: "parking spot", dependsOn: "venue", placeType: "parking", nearby: parkingAround("venue"), query: parkingNear("venue") },
     ],
   },
 };

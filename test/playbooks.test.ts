@@ -80,6 +80,17 @@ test("parking searches near the primary pick, falling back to the area", () => {
   assert.equal(parking.query(draft), "parking near 1 Main St");
 });
 
+test("parking searches nearby the primary pick's coordinates when it has them", () => {
+  for (const [type, primary] of [["date", "dinner"], ["friends", "activity"], ["business", "venue"]] as const) {
+    const parking = PLAYBOOKS[type].components.find((c) => c.kind === "parking")!;
+    const draft = newDraft(null);
+    assert.equal(parking.nearby?.text, "parking");
+    assert.equal(parking.nearby?.center(draft), undefined);
+    draft.picks[primary] = place("Spot", { location: { lat: 1, lng: 2 } });
+    assert.deepEqual(parking.nearby?.center(draft), { lat: 1, lng: 2 }, type);
+  }
+});
+
 test("party size: 2 for a date, from answers for friends and business", () => {
   const draft = newDraft(null);
   assert.equal(PLAYBOOKS.date.partySize(draft), 2);

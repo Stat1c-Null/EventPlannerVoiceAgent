@@ -250,6 +250,64 @@ test("parking is searched near the chosen primary venue", async () => {
   assert.equal(searches[0]!.includedType, undefined);
 });
 
+const VENUE_SPOT = { lat: 34.07, lng: -84.29 };
+
+/** Like the default fake search, but venues have coordinates and the nearby search can come back empty. */
+function locatedSearch(nearbyResults: PlaceResult[]) {
+  return async (query: PlacesQuery): Promise<PlaceResult[]> => {
+    if (query.near) return nearbyResults;
+    return [
+      { name: `${query.kind} one`, address: `1 ${query.kind} St`, sample: false, ...(query.kind === "venue" ? { location: VENUE_SPOT } : {}) },
+    ];
+  };
+}
+
+test("parking is first searched within a small area around the venue's coordinates", async () => {
+  const searches: PlacesQuery[] = [];
+  const inner = locatedSearch([{ name: "Next-door Garage", address: "3 venue St", sample: false }]);
+  const { agent } = setup({ search: async (q) => { searches.push(q); return inner(q); } });
+  const call = phoneCall();
+  await throughDetails(agent, call, "business event", { headcount: 12, purpose: "offsite", room_needs: "projector" });
+  await answer(agent, call, "venue one");
+  await answer(agent, call, "catering one");
+
+  const parkingSearches = searches.filter((q) => q.kind === "parking");
+  assert.equal(parkingSearches.length, 1);
+  assert.deepEqual(parkingSearches[0], {
+    text: "parking", kind: "parking", area: "Austin, TX", includedType: "parking", near: VENUE_SPOT,
+  });
+  assert.deepEqual(fieldItems(lastTask(call))[0]!.choices, ["Next-door Garage", "none of these"]);
+});
+
+test("if nothing is parked nearby, parking falls back to the address search", async () => {
+  const searches: PlacesQuery[] = [];
+  const inner = locatedSearch([]);
+  const { agent } = setup({ search: async (q) => { searches.push(q); return inner(q); } });
+  const call = phoneCall();
+  await throughDetails(agent, call, "business event", { headcount: 12, purpose: "offsite", room_needs: "projector" });
+  await answer(agent, call, "venue one");
+  await answer(agent, call, "catering one");
+
+  const parkingSearches = searches.filter((q) => q.kind === "parking");
+  assert.equal(parkingSearches.length, 2);
+  assert.equal(parkingSearches[1]!.text, "parking near 1 venue St");
+  assert.equal(parkingSearches[1]!.near, undefined);
+  assert.equal(lastTaskName(call), "pick:parking");
+});
+
+test("a parking refinement is added to the nearby search too", async () => {
+  const searches: PlacesQuery[] = [];
+  const inner = locatedSearch([{ name: "Garage", address: "3 venue St", sample: false }]);
+  const { agent } = setup({ search: async (q) => { searches.push(q); return inner(q); } });
+  const call = phoneCall();
+  await throughDetails(agent, call, "business event", { headcount: 12, purpose: "offsite", room_needs: "projector" });
+  await answer(agent, call, "venue one");
+  await answer(agent, call, "catering one");
+  await answer(agent, call, "none of these", "covered garage");
+  assert.equal(searches.at(-1)!.text, "parking covered garage");
+  assert.deepEqual(searches.at(-1)!.near, VENUE_SPOT);
+});
+
 test("business events never ask about a gift and use headcount as party size", async () => {
   const { agent, created } = setup();
   const call = phoneCall();

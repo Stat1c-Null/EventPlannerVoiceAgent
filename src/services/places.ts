@@ -1,4 +1,4 @@
-import type { PlaceResult, PlanItemKind } from "../types.ts";
+import type { LatLng, PlaceResult, PlanItemKind } from "../types.ts";
 import { sampleResults } from "./catalog.ts";
 
 export const PLACES_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
@@ -14,6 +14,36 @@ export interface PlacesQuery {
   area: string;
   /** Google place type (Table A) that every result must have, e.g. "parking". */
   includedType?: string;
+  /**
+   * Only return places within NEARBY_RADIUS_METERS of this point, nearest first. `text` must
+   * then be a plain category such as "parking": Google lets an address in the text override
+   * location preferences.
+   */
+  near?: LatLng;
+}
+
+export const NEARBY_RADIUS_METERS = 600;
+const METERS_PER_DEGREE_LAT = 111_320;
+
+/** Places with a location first, nearest first; places without one keep their order at the end. */
+function sortByDistance(results: PlaceResult[], center: LatLng): PlaceResult[] {
+  // Equirectangular approximation: plenty accurate across a few hundred metres.
+  const cosLat = Math.cos((center.lat * Math.PI) / 180);
+  const distance = (p: PlaceResult) =>
+    p.location ? Math.hypot((p.location.lat - center.lat), (p.location.lng - center.lng) * cosLat) : Infinity;
+  return [...results].sort((a, b) => distance(a) - distance(b));
+}
+
+/** Text Search only restricts to rectangles, so use the box that encloses the radius. */
+function boxAround(center: LatLng, meters: number) {
+  const dLat = meters / METERS_PER_DEGREE_LAT;
+  const dLng = meters / (METERS_PER_DEGREE_LAT * Math.cos((center.lat * Math.PI) / 180));
+  return {
+    rectangle: {
+      low: { latitude: center.lat - dLat, longitude: center.lng - dLng },
+      high: { latitude: center.lat + dLat, longitude: center.lng + dLng },
+    },
+  };
 }
 
 export interface PlacesOptions {
@@ -42,13 +72,18 @@ export async function searchPlaces(
         pageSize: RESULT_LIMIT,
         // includedType alone only biases results; strict filtering drops other place types.
         ...(query.includedType ? { includedType: query.includedType, strictTypeFiltering: true } : {}),
+        ...(query.near
+          ? { locationRestriction: boxAround(query.near, NEARBY_RADIUS_METERS), rankPreference: "DISTANCE" }
+          : {}),
       }),
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     });
     if (!response.ok) {
       throw new Error(`Places API returned HTTP ${response.status}`);
     }
-    return parsePlacesResponse(await response.json());
+    const results = parsePlacesResponse(await response.json());
+    // rankPreference DISTANCE isn't strictly nearest-first in practice, so sort here too.
+    return query.near ? sortByDistance(results, query.near) : results;
   } catch (err) {
     options.onError?.(err);
     return sampleResults(query.kind, query.area);

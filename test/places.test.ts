@@ -73,6 +73,49 @@ test("a query with a place type restricts results to that type", async () => {
   });
 });
 
+test("a query near a point is restricted to a ~600 m box around it and ranked by distance", async () => {
+  let body: {
+    textQuery?: string;
+    rankPreference?: string;
+    locationRestriction?: { rectangle: { low: { latitude: number; longitude: number }; high: { latitude: number; longitude: number } } };
+  } = {};
+  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return jsonResponse({ places: [] });
+  }) as typeof fetch;
+  const center = { lat: 33.8268, lng: -84.387 };
+  await searchPlaces(
+    { text: "parking", kind: "parking", area: "Atlanta, GA", includedType: "parking", near: center },
+    { apiKey: "k", fetchImpl },
+  );
+  assert.equal(body.textQuery, "parking");
+  assert.equal(body.rankPreference, "DISTANCE");
+  const { low, high } = body.locationRestriction!.rectangle;
+  const metersPerDegLat = 111_320;
+  const metersPerDegLng = 111_320 * Math.cos((center.lat * Math.PI) / 180);
+  assert.ok(Math.abs((center.lat - low.latitude) * metersPerDegLat - 600) < 1);
+  assert.ok(Math.abs((high.latitude - center.lat) * metersPerDegLat - 600) < 1);
+  assert.ok(Math.abs((center.lng - low.longitude) * metersPerDegLng - 600) < 1);
+  assert.ok(Math.abs((high.longitude - center.lng) * metersPerDegLng - 600) < 1);
+});
+
+test("nearby results are sorted nearest first, whatever order Google returns", async () => {
+  const center = { lat: 33.8268, lng: -84.387 };
+  const fetchImpl = (async () =>
+    jsonResponse({
+      places: [
+        { displayName: { text: "Far" }, formattedAddress: "1 St", location: { latitude: 33.8318, longitude: -84.387 } },
+        { displayName: { text: "No location" }, formattedAddress: "2 St" },
+        { displayName: { text: "Near" }, formattedAddress: "3 St", location: { latitude: 33.8278, longitude: -84.387 } },
+      ],
+    })) as typeof fetch;
+  const results = await searchPlaces(
+    { text: "parking", kind: "parking", area: "Atlanta, GA", near: center },
+    { apiKey: "k", fetchImpl },
+  );
+  assert.deepEqual(results.map((r) => r.name), ["Near", "Far", "No location"]);
+});
+
 test("a non-2xx response falls back to samples and reports the error", async () => {
   const errors: unknown[] = [];
   const fetchImpl = (async () => jsonResponse({ error: "denied" }, 403)) as typeof fetch;
