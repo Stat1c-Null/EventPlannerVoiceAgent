@@ -3,6 +3,7 @@ import { shareUrl } from "../config.ts";
 import type { EventStore } from "../store/events.ts";
 import { normalizeEventId } from "../store/ids.ts";
 import type { EventPlan } from "../types.ts";
+import { renderIcs } from "./calendar.ts";
 import { publicPlan, renderHome, renderNotFound, renderPlan } from "./render.ts";
 
 export interface WebDeps {
@@ -13,7 +14,8 @@ export interface WebDeps {
 const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Content-Security-Policy":
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'self'",
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; " +
+    "frame-src https://www.openstreetmap.org; base-uri 'none'; form-action 'self'",
   "Referrer-Policy": "no-referrer",
 };
 
@@ -60,6 +62,16 @@ function route(deps: WebDeps, method: string, rawUrl: string, res: ServerRespons
   if (path === "/e") {
     const id = normalizeEventId(url.searchParams.get("id") ?? "");
     return redirect(res, id ? `/e/${encodeURIComponent(id)}` : "/");
+  }
+
+  const calendarMatch = /^\/e\/([^/]+)\/calendar\.ics$/.exec(path);
+  if (calendarMatch) {
+    const plan = lookup(deps, calendarMatch[1]!);
+    const ics = plan ? renderIcs(plan, shareUrl(deps.publicBaseUrl, plan.id)) : null;
+    if (!plan || !ics) return html(res, 404, renderNotFound());
+    return send(res, 200, "text/calendar; charset=utf-8", ics, {
+      "Content-Disposition": `attachment; filename="${plan.id}.ics"`,
+    });
   }
 
   const pageMatch = /^\/e\/([^/]+)$/.exec(path);

@@ -171,3 +171,15 @@ test("buildPlan turns picks into simulated items in playbook order", () => {
   assert.ok(plan.items[1]?.notes?.includes("books"));
   assert.ok(plan.items.every((i) => i.confirmation.simulated));
 });
+
+test("buildPlan carries each pick's location onto its item", () => {
+  const draft = newDraft(null);
+  draft.type = "date";
+  draft.basics = { when: "2026-10-20T19:00", area: "Austin, TX" };
+  draft.components = PLAYBOOKS.date.components;
+  draft.picks.dinner = place("Olive Grove", { location: { lat: 30.26, lng: -97.74 } });
+  draft.picks.parking = place("Garage");
+  const plan = buildPlan(draft, "confirmed", new Date("2026-10-12T12:00:00Z"));
+  assert.deepEqual(plan.items[0]?.location, { lat: 30.26, lng: -97.74 });
+  assert.equal(plan.items[1] && "location" in plan.items[1], false);
+});

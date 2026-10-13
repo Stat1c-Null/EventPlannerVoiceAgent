@@ -14,11 +14,17 @@ export interface Confirmation {
   simulated: true;
 }
 
+export interface LatLng {
+  lat: number;
+  lng: number;
+}
+
 export interface PlanItem {
   kind: PlanItemKind;
   name: string;
   address: string;
   mapsUrl?: string;
+  location?: LatLng;
   time?: string;
   notes?: string;
   confirmation: Confirmation;
@@ -47,5 +53,6 @@ export interface PlaceResult {
   name: string;
   address: string;
   mapsUrl?: string;
+  location?: LatLng;
   sample: boolean;
 }

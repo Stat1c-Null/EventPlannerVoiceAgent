@@ -64,6 +64,25 @@ test("GET /api/events/:id returns JSON without the phone number", async () => {
   assert.equal("callerPhone" in body, false);
 });
 
+test("GET /e/:id/calendar.ics downloads a calendar file", async () => {
+  const res = await fetch(`${base}/e/${id.toLowerCase()}/calendar.ics`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") ?? "", /text\/calendar/);
+  assert.equal(res.headers.get("content-disposition"), `attachment; filename="${id}.ics"`);
+  const body = await res.text();
+  assert.ok(body.includes("DTSTART:20261017T200000"));
+  assert.ok(body.includes(`https://plans.example.com/e/${id}`));
+});
+
+test("calendar for an unknown plan returns 404", async () => {
+  assert.equal((await fetch(`${base}/e/NOPE-NOPE-00/calendar.ics`)).status, 404);
+});
+
+test("the CSP allows only the OpenStreetMap embed as a frame", async () => {
+  const csp = (await fetch(`${base}/`)).headers.get("content-security-policy") ?? "";
+  assert.match(csp, /frame-src https:\/\/www\.openstreetmap\.org/);
+});
+
 test("unknown plans and malformed IDs return 404", async () => {
   assert.equal((await fetch(`${base}/e/NOPE-NOPE-00`)).status, 404);
   assert.equal((await fetch(`${base}/e/%E0%A4%A`)).status, 404);

@@ -111,6 +111,21 @@ test("parsePlacesResponse skips malformed entries, dedupes names, and caps at 3"
   );
 });
 
+test("the field mask asks for each place's location", () => {
+  assert.ok(PLACES_FIELD_MASK.split(",").includes("places.location"));
+});
+
+test("parsePlacesResponse keeps a valid location and drops a malformed one", () => {
+  const [withLocation, withoutLocation] = parsePlacesResponse({
+    places: [
+      { displayName: { text: "A" }, formattedAddress: "1 A St", location: { latitude: 33.75, longitude: -84.39 } },
+      { displayName: { text: "B" }, formattedAddress: "1 B St", location: { latitude: "x" } },
+    ],
+  });
+  assert.deepEqual(withLocation?.location, { lat: 33.75, lng: -84.39 });
+  assert.equal(withoutLocation && "location" in withoutLocation, false);
+});
+
 test("parsePlacesResponse returns [] for non-object bodies", () => {
   assert.deepEqual(parsePlacesResponse(null), []);
   assert.deepEqual(parsePlacesResponse("nope"), []);

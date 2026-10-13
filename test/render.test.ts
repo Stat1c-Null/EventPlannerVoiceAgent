@@ -135,6 +135,63 @@ test("the page uses the purple accent instead of orange", () => {
   assert.ok(!html.includes("#c2410c"));
 });
 
+test("renderPlan lays the items out as a timeline with an icon per item type", () => {
+  const html = renderPlan(plan(), "x");
+  const timeline = /<ol class="timeline">([\s\S]*?)<\/ol>/.exec(html)?.[1] ?? "";
+  assert.equal(timeline.match(/<li class="stop">/g)?.length, 2);
+  assert.ok(timeline.includes("🍽️"), "dinner icon");
+  assert.ok(timeline.includes("🅿️"), "parking icon");
+  assert.ok(timeline.includes("7:00 PM"), "the dinner's time is shown on its stop");
+});
+
+test("renderPlan themes the page by event type", () => {
+  assert.ok(renderPlan(plan(), "x").includes('<body class="theme-date">'));
+  assert.ok(renderPlan(plan({ type: "friends" }), "x").includes('<body class="theme-friends">'));
+  assert.ok(renderPlan(plan({ type: "business" }), "x").includes('<body class="theme-business">'));
+  assert.ok(/\.theme-date\{[^}]*--tint:/.test(renderPlan(plan(), "x")));
+});
+
+test("renderPlan has a hero with the big date and a copyable event ID chip", () => {
+  const html = renderPlan(plan(), "x");
+  const hero = /<header class="hero">([\s\S]*?)<\/header>/.exec(html)?.[1] ?? "";
+  assert.ok(hero.includes("<h1>Date night in Austin, TX</h1>"));
+  assert.ok(/<p class="hero-date">Tuesday, October 20, 2026 · 7:00 PM<\/p>/.test(hero), hero);
+  assert.ok(hero.includes('data-copy="BLUE-FALCON-42"'));
+});
+
+test("renderPlan shows an OpenStreetMap preview centered on the first located item", () => {
+  const located = plan({
+    items: [
+      { kind: "dinner", name: "Olive Grove", address: "1 Main St", location: { lat: 30.26, lng: -97.74 }, confirmation: { code: "RSV-ABCDE", simulated: true } },
+      { kind: "parking", name: "Garage", address: "2 Main St", location: { lat: 30.27, lng: -97.75 }, confirmation: { code: "PRK-FGHJK", simulated: true } },
+    ],
+  });
+  const html = renderPlan(located, "x");
+  const src = /<iframe[^>]*src="([^"]+)"/.exec(html)?.[1] ?? "";
+  assert.ok(src.startsWith("https://www.openstreetmap.org/export/embed.html?"), src);
+  assert.ok(src.includes("marker=30.26,-97.74"), src);
+  assert.ok(src.includes("bbox=-97.755,30.255,-97.735,30.275"), src);
+});
+
+test("renderPlan has no map without locations but still links walking directions", () => {
+  const html = renderPlan(plan(), "x");
+  assert.ok(!html.includes("<iframe"));
+  assert.ok(
+    html.includes(
+      'href="https://www.google.com/maps/dir/?api=1&amp;origin=2%20Main%20St&amp;destination=1%20Main%20St&amp;travelmode=walking"',
+    ),
+  );
+});
+
+test("renderPlan has no directions link when there is no parking", () => {
+  const html = renderPlan(plan({ items: [plan().items[0]!] }), "x");
+  assert.ok(!html.includes("maps/dir"));
+});
+
+test("renderPlan offers an add-to-calendar download", () => {
+  assert.ok(renderPlan(plan(), "x").includes('href="/e/BLUE-FALCON-42/calendar.ics"'));
+});
+
 test("renderPlan omits the group and budget tiles when unknown", () => {
   const html = renderPlan(plan({ basics: { when: "2026-10-18T18:00", area: "Atlanta" } }), "x");
   assert.ok(!html.includes("<dt>Group</dt>"));

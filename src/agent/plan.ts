@@ -27,6 +27,7 @@ export function buildPlan(
       name: pick.name,
       address: pick.address,
       ...(pick.mapsUrl ? { mapsUrl: pick.mapsUrl } : {}),
+      ...(pick.location ? { location: pick.location } : {}),
       ...(index === 0 && draft.basics.when ? { time: draft.basics.when } : {}),
       ...(notes ? { notes } : {}),
       confirmation: mockConfirmation(component.kind, random),

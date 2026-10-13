@@ -2,7 +2,9 @@ import type { PlaceResult, PlanItemKind } from "../types.ts";
 import { sampleResults } from "./catalog.ts";
 
 export const PLACES_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
-export const PLACES_FIELD_MASK = "places.displayName,places.formattedAddress,places.googleMapsUri";
+// All four fields are billed at the same "Text Search Pro" tier.
+export const PLACES_FIELD_MASK =
+  "places.displayName,places.formattedAddress,places.googleMapsUri,places.location";
 const RESULT_LIMIT = 3;
 const DEFAULT_TIMEOUT_MS = 5000;
 
@@ -65,6 +67,7 @@ export function parsePlacesResponse(body: unknown): PlaceResult[] {
       displayName?: { text?: unknown };
       formattedAddress?: unknown;
       googleMapsUri?: unknown;
+      location?: { latitude?: unknown; longitude?: unknown };
     };
     const name = p.displayName?.text;
     const address = p.formattedAddress;
@@ -72,10 +75,13 @@ export function parsePlacesResponse(body: unknown): PlaceResult[] {
     const key = name.trim().toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
+    const lat = p.location?.latitude;
+    const lng = p.location?.longitude;
     results.push({
       name,
       address,
       mapsUrl: typeof p.googleMapsUri === "string" ? p.googleMapsUri : undefined,
+      ...(typeof lat === "number" && typeof lng === "number" ? { location: { lat, lng } } : {}),
       sample: false,
     });
     if (results.length === RESULT_LIMIT) break;
