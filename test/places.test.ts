@@ -4,6 +4,7 @@ import {
   PLACES_ENDPOINT,
   PLACES_FIELD_MASK,
   parsePlacesResponse,
+  resolveLocality,
   searchPlaces,
   type PlacesQuery,
 } from "../src/services/places.ts";
@@ -124,6 +125,38 @@ test("parsePlacesResponse keeps a valid location and drops a malformed one", () 
   });
   assert.deepEqual(withLocation?.location, { lat: 33.75, lng: -84.39 });
   assert.equal(withoutLocation && "location" in withoutLocation, false);
+});
+
+test("resolveLocality asks for one city-type place and returns its name and address", async () => {
+  let init: RequestInit | undefined;
+  const fetchImpl = (async (_url: string | URL | Request, i?: RequestInit) => {
+    init = i;
+    return jsonResponse({ places: [{ displayName: { text: "Alpharetta" }, formattedAddress: "Alpharetta, GA, USA" }] });
+  }) as typeof fetch;
+  const result = await resolveLocality("Alfaretta", { apiKey: "k", fetchImpl });
+  assert.deepEqual(result, { name: "Alpharetta", formatted: "Alpharetta, GA, USA" });
+  assert.deepEqual(JSON.parse(String(init?.body)), {
+    textQuery: "Alfaretta",
+    pageSize: 1,
+    includedType: "locality",
+    strictTypeFiltering: true,
+  });
+  assert.equal((init?.headers as Record<string, string>)["X-Goog-FieldMask"], "places.displayName,places.formattedAddress");
+});
+
+test("resolveLocality returns null when nothing matches, there is no key, or the call fails", async () => {
+  const empty = (async () => jsonResponse({})) as typeof fetch;
+  assert.equal(await resolveLocality("Midtown Atlanta", { apiKey: "k", fetchImpl: empty }), null);
+
+  let called = false;
+  const spy = (async () => { called = true; return jsonResponse({}); }) as typeof fetch;
+  assert.equal(await resolveLocality("Alfaretta", { fetchImpl: spy }), null);
+  assert.equal(called, false);
+
+  const errors: unknown[] = [];
+  const failing = (async () => jsonResponse({ error: "denied" }, 403)) as typeof fetch;
+  assert.equal(await resolveLocality("Alfaretta", { apiKey: "k", fetchImpl: failing, onError: (e) => errors.push(e) }), null);
+  assert.equal(errors.length, 1);
 });
 
 test("parsePlacesResponse returns [] for non-object bodies", () => {

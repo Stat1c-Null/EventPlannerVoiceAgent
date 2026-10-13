@@ -2,7 +2,7 @@ import * as guava from "@guava-ai/guava-sdk";
 import { shareUrl } from "../config.ts";
 import { toLocalIso } from "../datetime.ts";
 import { formatUsd } from "../money.ts";
-import type { PlacesQuery } from "../services/places.ts";
+import type { Locality, PlacesQuery } from "../services/places.ts";
 import { sendShareLink, type SmsSender } from "../services/sms.ts";
 import type { EventStore } from "../store/events.ts";
 import type { EventPlan, PlaceResult, PlanItemKind } from "../types.ts";
@@ -29,6 +29,8 @@ import {
 export interface AgentDeps {
   store: Pick<EventStore, "create">;
   search: (query: PlacesQuery) => Promise<PlaceResult[]>;
+  /** Corrects the spelling of the city the caller named; null keeps their words. */
+  resolveArea?: (spoken: string) => Promise<Locality | null>;
   sms: SmsSender;
   agentNumber: string;
   publicBaseUrl: string;
@@ -110,12 +112,29 @@ export function createAgent(deps: AgentDeps): guava.Agent {
     const rawBudget = await call.getField("budget");
     const budget = formatUsd(rawBudget) ?? fieldText(rawBudget);
     const when = await call.getField("event_datetime");
+    const { area, corrected } = await resolveArea(fieldText(await call.getField("area")));
     draft.basics = {
       when: toLocalIso(when) ?? fieldText(when),
-      area: fieldText(await call.getField("area")),
+      area,
       ...(budget ? { budget } : {}),
     };
-    await call.setTask(detailsTask(PLAYBOOKS[draft.type]));
+    await call.setTask(detailsTask(PLAYBOOKS[draft.type], corrected ? area : undefined));
+  }
+
+  /** Google's spelling of the city when one matches; `corrected` when that changes its name. */
+  async function resolveArea(spoken: string): Promise<{ area: string; corrected: boolean }> {
+    if (!spoken || !deps.resolveArea) return { area: spoken, corrected: false };
+    let locality: Locality | null = null;
+    try {
+      locality = await deps.resolveArea(spoken);
+    } catch (err) {
+      logger.warn("Checking the city %s failed: %s", spoken, err);
+    }
+    if (!locality) return { area: spoken, corrected: false };
+    const area = locality.formatted.replace(/, USA$/, "");
+    const corrected = !spoken.toLowerCase().includes(locality.name.toLowerCase());
+    if (corrected) logger.info("Corrected the city from %s to %s", spoken, area);
+    return { area, corrected };
   }
 
   async function handleDetails(call: guava.Call, draft: PlanDraft): Promise<void> {

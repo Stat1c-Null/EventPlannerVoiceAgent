@@ -46,10 +46,14 @@ export function triageTask(): TaskArgs {
   };
 }
 
-export function detailsTask(playbook: Playbook): TaskArgs {
+/** `confirmArea` is set when the city was corrected from what speech-to-text heard. */
+export function detailsTask(playbook: Playbook, confirmArea?: string): TaskArgs {
+  const areaCheck = confirmArea
+    ? `First, briefly confirm we're planning in ${confirmArea}; if they say no, note the right place. `
+    : "";
   return {
     taskId: `details:${playbook.type}`,
-    objective: `Ask a few quick questions to plan a great ${playbook.label}. Tone: ${playbook.tone}`,
+    objective: `${areaCheck}Ask a few quick questions to plan a great ${playbook.label}. Tone: ${playbook.tone}`,
     checklist: playbook.detailFields.map((field) =>
       guava.Field({
         key: field.key,

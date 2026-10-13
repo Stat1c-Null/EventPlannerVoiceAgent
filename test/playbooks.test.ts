@@ -53,6 +53,12 @@ test("each playbook's details task asks only that playbook's questions", () => {
   assert.equal(detailsTask(PLAYBOOKS.business).taskId, "details:business");
 });
 
+test("detailsTask can start by confirming a corrected city", () => {
+  const withCheck = detailsTask(PLAYBOOKS.business, "Alpharetta, GA");
+  assert.ok(withCheck.objective?.includes("confirm we're planning in Alpharetta, GA"), withCheck.objective);
+  assert.ok(!detailsTask(PLAYBOOKS.business).objective?.includes("confirm we're planning in"));
+});
+
 test("components per playbook, with the date gift only when wanted", () => {
   const draft = newDraft(null);
   const kinds = (type: "date" | "friends" | "business") =>

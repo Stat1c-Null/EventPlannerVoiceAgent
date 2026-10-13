@@ -9,7 +9,7 @@
 import * as guava from "@guava-ai/guava-sdk";
 import { createAgent } from "./src/agent/agent.ts";
 import { loadConfig } from "./src/config.ts";
-import { searchPlaces } from "./src/services/places.ts";
+import { resolveLocality, searchPlaces } from "./src/services/places.ts";
 import { EventStore } from "./src/store/events.ts";
 import { createWebServer } from "./src/web/server.ts";
 
@@ -31,6 +31,11 @@ const agent = createAgent({
     searchPlaces(query, {
       apiKey: config.placesApiKey,
       onError: (err) => logger.warn("Places search failed, using samples: %s", err),
+    }),
+  resolveArea: (spoken) =>
+    resolveLocality(spoken, {
+      apiKey: config.placesApiKey,
+      onError: (err) => logger.warn("City lookup failed, keeping the caller's words: %s", err),
     }),
   sms: new guava.Client(),
   agentNumber: config.agentNumber,

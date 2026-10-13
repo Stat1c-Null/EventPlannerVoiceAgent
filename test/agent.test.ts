@@ -138,6 +138,52 @@ test("Guava's datetime object is saved as a readable local ISO time", async () =
   assert.equal(created[0]!.items[0]!.time, "2026-10-18T18:00");
 });
 
+async function triageWithArea(agent: guava.Agent, call: MockCall, area: string) {
+  await agent.handlers.onCallStart(call);
+  await complete(agent, call, "triage", { event_type: "business event", event_datetime: "2026-10-20T19:00", area });
+}
+
+const alpharetta = async (spoken: string) =>
+  /alph|alf/i.test(spoken) ? { name: "Alpharetta", formatted: "Alpharetta, GA, USA" } : null;
+
+test("a misheard city is replaced by Google's spelling and confirmed with the caller", async () => {
+  const { agent, created, searches } = setup({ resolveArea: alpharetta });
+  const call = phoneCall();
+  await triageWithArea(agent, call, "Alfaretta");
+  assert.ok(lastTask(call).objective.includes("confirm we're planning in Alpharetta, GA"), lastTask(call).objective);
+
+  await complete(agent, call, "details:business", { headcount: 8, purpose: "offsite", room_needs: "projector" });
+  assert.ok(searches[0]!.text.endsWith("in Alpharetta, GA"), searches[0]!.text);
+  assert.equal(searches[0]!.area, "Alpharetta, GA");
+  await pickFirstOfEach(agent, call, ["venue", "catering", "parking"]);
+  await answer(agent, call, "looks good");
+  assert.equal(created[0]!.basics.area, "Alpharetta, GA");
+  assert.equal(created[0]!.title, "Business event in Alpharetta, GA");
+});
+
+test("a city the caller already said correctly is normalized without a spoken check", async () => {
+  const { agent } = setup({ resolveArea: async () => ({ name: "Atlanta", formatted: "Atlanta, GA, USA" }) });
+  const call = phoneCall();
+  await triageWithArea(agent, call, "atlanta georgia");
+  assert.ok(!lastTask(call).objective.includes("confirm we're planning in"));
+});
+
+test("the caller's words are kept when no city matches or the lookup fails", async () => {
+  const none = setup({ resolveArea: async () => null });
+  const noneCall = phoneCall();
+  await triageWithArea(none.agent, noneCall, "Midtown Atlanta");
+  await complete(none.agent, noneCall, "details:business", { headcount: 8, purpose: "offsite", room_needs: "projector" });
+  assert.equal(none.searches[0]!.area, "Midtown Atlanta");
+  assert.ok(!lastTask(noneCall).objective.includes("confirm we're planning in"));
+
+  const failing = setup({ resolveArea: async () => { throw new Error("network down"); } });
+  const failingCall = phoneCall();
+  await triageWithArea(failing.agent, failingCall, "Alfaretta");
+  assert.equal(lastTaskName(failingCall), "details:business");
+  await complete(failing.agent, failingCall, "details:business", { headcount: 8, purpose: "offsite", room_needs: "projector" });
+  assert.equal(failing.searches[0]!.area, "Alfaretta");
+});
+
 test("the budget is saved as a dollar amount", async () => {
   const { agent, created } = setup();
   const call = phoneCall();

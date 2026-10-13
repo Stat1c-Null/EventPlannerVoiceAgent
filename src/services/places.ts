@@ -55,6 +55,44 @@ export async function searchPlaces(
   }
 }
 
+export interface Locality {
+  /** City name, e.g. "Alpharetta". */
+  name: string;
+  /** Google's formatted address, e.g. "Alpharetta, GA, USA". */
+  formatted: string;
+}
+
+/**
+ * Looks up the city a caller named, to fix speech-to-text misspellings ("Alfaretta" →
+ * Alpharetta). Only city-type places count, so neighborhoods like "Buckhead" return null and
+ * the caller's own words are kept. Null too without a key or on any error.
+ */
+export async function resolveLocality(text: string, options: PlacesOptions = {}): Promise<Locality | null> {
+  if (!options.apiKey) return null;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  try {
+    const response = await fetchImpl(PLACES_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": options.apiKey,
+        "X-Goog-FieldMask": "places.displayName,places.formattedAddress",
+      },
+      body: JSON.stringify({ textQuery: text, pageSize: 1, includedType: "locality", strictTypeFiltering: true }),
+      signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`Places API returned HTTP ${response.status}`);
+    const body = (await response.json()) as { places?: Array<{ displayName?: { text?: unknown }; formattedAddress?: unknown }> };
+    const place = body.places?.[0];
+    const name = place?.displayName?.text;
+    const formatted = place?.formattedAddress;
+    return typeof name === "string" && typeof formatted === "string" ? { name, formatted } : null;
+  } catch (err) {
+    options.onError?.(err);
+    return null;
+  }
+}
+
 export function parsePlacesResponse(body: unknown): PlaceResult[] {
   if (typeof body !== "object" || body === null) return [];
   const places = (body as { places?: unknown }).places;
