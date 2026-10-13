@@ -1,3 +1,4 @@
+import { toLocalIso } from "../datetime.ts";
 import type { EventPlan, PlanItem, PlanItemKind } from "../types.ts";
 
 export type PublicPlan = Omit<EventPlan, "callerPhone">;
@@ -60,6 +61,11 @@ button,input{font:inherit;border-radius:10px;border:1px solid var(--border);padd
 button{background:var(--accent);color:#fff;border:none;cursor:pointer}
 form{display:flex;gap:8px;flex-wrap:wrap}
 input{flex:1;min-width:0;text-transform:uppercase}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:16px 0}
+.facts div{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px}
+.facts dt{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.facts dd{margin:2px 0 0;font-weight:600}
+.facts .sub{display:block;font-weight:400;color:var(--muted)}
 `;
 
 function page(title: string, body: string): string {
@@ -76,10 +82,37 @@ function page(title: string, body: string): string {
 </html>`;
 }
 
+/** Splits a stored time into display parts, or null when it can't be parsed. */
+function whenParts(when: string): { date: string; time: string } | null {
+  const iso = toLocalIso(when) ?? when;
+  const date = new Date(iso);
+  if (!iso || Number.isNaN(date.getTime())) return null;
+  // ICU puts a narrow no-break space before AM/PM; use a plain space.
+  const plain = (text: string) => text.replace(/ /g, " ");
+  return {
+    date: plain(date.toLocaleDateString("en-US", { dateStyle: "full" })),
+    time: plain(date.toLocaleTimeString("en-US", { timeStyle: "short" })),
+  };
+}
+
 function formatWhen(when: string): string {
-  const date = new Date(when);
-  if (!when || Number.isNaN(date.getTime())) return when;
-  return date.toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" });
+  const parts = whenParts(when);
+  return parts ? `${parts.date}, ${parts.time}` : when;
+}
+
+function renderFacts(basics: EventPlan["basics"]): string {
+  const when = whenParts(basics.when);
+  const tiles: Array<[label: string, html: string]> = [
+    ["When", when
+      ? `${escapeHtml(when.date)}<span class="sub">${escapeHtml(when.time)}</span>`
+      : escapeHtml(basics.when || "Not set")],
+    ["Where", escapeHtml(basics.area || "Not set")],
+  ];
+  if (basics.partySize) {
+    tiles.push(["Group", `${basics.partySize} ${basics.partySize === 1 ? "person" : "people"}`]);
+  }
+  if (basics.budget) tiles.push(["Budget", escapeHtml(basics.budget)]);
+  return `<dl class="facts">${tiles.map(([label, html]) => `<div><dt>${label}</dt><dd>${html}</dd></div>`).join("")}</dl>`;
 }
 
 function renderItem(item: PlanItem): string {
@@ -95,17 +128,10 @@ function renderItem(item: PlanItem): string {
 }
 
 export function renderPlan(plan: EventPlan, shareLink: string): string {
-  const facts = [
-    formatWhen(plan.basics.when),
-    plan.basics.area,
-    plan.basics.partySize ? `${plan.basics.partySize} people` : "",
-    plan.basics.budget ? `Budget: ${plan.basics.budget}` : "",
-  ].filter(Boolean);
-
   const body = `
 <span class="badge">${escapeHtml(TYPE_LABELS[plan.type])}</span>
 <h1>${escapeHtml(plan.title)}</h1>
-<p class="muted">${facts.map(escapeHtml).join(" · ")}</p>
+${renderFacts(plan.basics)}
 <p class="muted">Event ID <span class="code">${escapeHtml(plan.id)}</span></p>
 ${plan.status === "incomplete" ? `<div class="banner">This plan is not finished — the call ended before everything was confirmed.</div>` : ""}
 ${plan.items.length > 0 ? plan.items.map(renderItem).join("\n") : `<p class="card">Nothing was booked for this event.</p>`}

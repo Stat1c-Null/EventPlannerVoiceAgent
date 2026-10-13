@@ -97,6 +97,29 @@ test("renderPlan shows a banner for incomplete plans", () => {
   assert.ok(!renderPlan(plan(), "x").includes("not finished"));
 });
 
+test("renderPlan shows the basics as labelled tiles with a readable date and time", () => {
+  const html = renderPlan(plan({ basics: { when: "2026-10-18T18:00", area: "Atlanta, Georgia", partySize: 2, budget: "$200" } }), "x");
+  for (const label of ["When", "Where", "Group", "Budget"]) {
+    assert.ok(html.includes(`<dt>${label}</dt>`), `missing tile ${label}`);
+  }
+  assert.ok(html.includes("Sunday, October 18, 2026"));
+  assert.ok(html.includes("6:00 PM"));
+  assert.ok(html.includes("<dd>2 people</dd>"));
+  assert.ok(!html.includes("Atlanta, Georgia · "), "facts should not be a dot-separated line");
+});
+
+test("renderPlan formats a Guava datetime object saved as JSON by older plans", () => {
+  const html = renderPlan(plan({ basics: { when: '{"day":18,"month":10,"year":2026,"hour":18,"minute":0}', area: "Atlanta, Georgia" } }), "x");
+  assert.ok(html.includes("Sunday, October 18, 2026"));
+  assert.ok(!html.includes("&quot;day&quot;"));
+});
+
+test("renderPlan omits the group and budget tiles when unknown", () => {
+  const html = renderPlan(plan({ basics: { when: "2026-10-18T18:00", area: "Atlanta" } }), "x");
+  assert.ok(!html.includes("<dt>Group</dt>"));
+  assert.ok(!html.includes("<dt>Budget</dt>"));
+});
+
 test("renderPlan copes with an unparseable time and no items", () => {
   const html = renderPlan(plan({ basics: { when: "next Friday-ish", area: "Austin" }, items: [] }), "x");
   assert.ok(html.includes("next Friday-ish"));

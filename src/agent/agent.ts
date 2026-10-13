@@ -1,5 +1,6 @@
 import * as guava from "@guava-ai/guava-sdk";
 import { shareUrl } from "../config.ts";
+import { toLocalIso } from "../datetime.ts";
 import type { PlacesQuery } from "../services/places.ts";
 import { sendShareLink, type SmsSender } from "../services/sms.ts";
 import type { EventStore } from "../store/events.ts";
@@ -15,9 +16,13 @@ import {
   parseTaskId,
   pickFieldKey,
   pickTask,
+  READY_TO_HANG_UP,
   refineFieldKey,
+  spokenEventId,
   summarizeDraft,
   triageTask,
+  wrapUpFieldKey,
+  wrapUpTask,
 } from "./tasks.ts";
 
 export interface AgentDeps {
@@ -102,8 +107,9 @@ export function createAgent(deps: AgentDeps): guava.Agent {
     if (!type) logger.warn("Unknown event type %s; using friends playbook", rawType);
     draft.type = type ?? "friends";
     const budget = fieldText(await call.getField("budget"));
+    const when = await call.getField("event_datetime");
     draft.basics = {
-      when: fieldText(await call.getField("event_datetime")),
+      when: toLocalIso(when) ?? fieldText(when),
       area: fieldText(await call.getField("area")),
       ...(budget ? { budget } : {}),
     };
@@ -171,15 +177,15 @@ export function createAgent(deps: AgentDeps): guava.Agent {
       logger.error("Saving plan for call %s failed: %s", call.id, err);
     }
     if (!saved) {
-      await call.hangup(
-        "Apologize: the plan couldn't be saved because of a technical problem, so there is no event ID. " +
-          `Read this plan back once so they can note it down, then say goodbye.\n${summarizeDraft(draft)}`,
-      );
-      return;
+      draft.wrapUpScript =
+        "I'm sorry, the plan couldn't be saved because of a technical problem, so there is no event ID. " +
+        `Here's the plan so you can note it down. ${summarizeDraft(draft).replace(/\n/g, ". ")}.`;
+      return startWrapUp(call, draft);
     }
 
     const eventId = saved.id;
     const link = shareUrl(deps.publicBaseUrl, eventId);
+    logger.info("Event %s saved: %s", eventId, link);
     const texted = await sendShareLink({
       sender: deps.sms,
       from: deps.agentNumber,
@@ -188,13 +194,29 @@ export function createAgent(deps: AgentDeps): guava.Agent {
       publicBaseUrl: deps.publicBaseUrl,
       onError: (err) => logger.warn("Sending SMS for %s failed: %s", eventId, err),
     });
-    await call.hangup(
-      "Tell the caller their plan is all set, and remind them the bookings are simulated for this demo. " +
-        `Their event ID is ${eventId}; read it slowly, word by word. ` +
-        (texted
-          ? "Say you've texted them the link so they can share it."
-          : `Tell them they can view and share it at ${link}.`),
-    );
+    const spoken = spokenEventId(eventId);
+    draft.wrapUpScript =
+      "Your plan is all set! Just so you know, every booking is simulated for this demo. " +
+      `Your event ID is ${spoken}. Once more, that's ${spoken}. ` +
+      (texted
+        ? "I've also texted you the link so you can share it."
+        : `You can view and share it at ${link}.`);
+    return startWrapUp(call, draft);
+  }
+
+  async function startWrapUp(call: guava.Call, draft: PlanDraft): Promise<void> {
+    draft.attempt += 1;
+    await call.setTask(wrapUpTask(draft.wrapUpScript ?? "", draft.attempt));
+  }
+
+  async function handleWrapUp(call: guava.Call, draft: PlanDraft, attempt: number): Promise<void> {
+    const answer = fieldText(await call.getField(wrapUpFieldKey(attempt))).toLowerCase();
+    if (answer === READY_TO_HANG_UP) {
+      await call.hangup("Thank the caller warmly and say goodbye.");
+      return;
+    }
+    // Anything but an explicit "ready to hang up" keeps the caller on the line.
+    return startWrapUp(call, draft);
   }
 
   agent.onCallStart(async (call) => {
@@ -215,6 +237,7 @@ export function createAgent(deps: AgentDeps): guava.Agent {
     if (name.startsWith("details:")) return handleDetails(call, draft);
     if (name.startsWith("pick:")) return handlePick(call, draft, name.slice("pick:".length) as PlanItemKind, attempt);
     if (name === "confirm") return handleConfirm(call, draft, attempt);
+    if (name === "wrap-up") return handleWrapUp(call, draft, attempt);
     logger.warn("Unexpected task %s on call %s", taskId, call.id);
   });
 

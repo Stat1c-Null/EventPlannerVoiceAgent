@@ -109,6 +109,38 @@ export function confirmTask(summary: string, changeChoices: string[], attempt: n
   };
 }
 
+export const READY_TO_HANG_UP = "ready to hang up";
+export const REPEAT_EVENT_ID = "repeat the event ID";
+export const wrapUpFieldKey = (attempt: number): string => `wrap_up_${attempt}`;
+
+/** "BLUE-FALCON-42" → "BLUE FALCON 42", so the agent reads it as words, not "dash". */
+export const spokenEventId = (eventId: string): string => eventId.split("-").join(" ");
+
+/**
+ * Reads `script` verbatim, then asks whether the caller is ready to hang up. The agent only
+ * hangs up once the caller picks READY_TO_HANG_UP; any other answer repeats this task.
+ */
+export function wrapUpTask(script: string, attempt: number): TaskArgs {
+  return {
+    taskId: `wrap-up#${attempt}`,
+    objective:
+      "Wrap up the call. Say the script slowly and clearly, then ask whether they're ready to hang up " +
+      "or want to hear the event ID again. Answer any other questions they have. Never end the call " +
+      "until the caller clearly says they're ready to hang up.",
+    checklist: [
+      guava.Say(script),
+      guava.Field({
+        key: wrapUpFieldKey(attempt),
+        fieldType: "multiple_choice",
+        choices: [READY_TO_HANG_UP, REPEAT_EVENT_ID],
+        description:
+          `Choose "${READY_TO_HANG_UP}" only if the caller explicitly says they're done or ready to hang up. ` +
+          `Choose "${REPEAT_EVENT_ID}" if they want it again or didn't catch it.`,
+      }),
+    ],
+  };
+}
+
 export function summarizeDraft(draft: PlanDraft): string {
   const lines = [`When: ${draft.basics.when ?? "not set"}`, `Where: ${draft.basics.area ?? "not set"}`];
   for (const component of draft.components) {

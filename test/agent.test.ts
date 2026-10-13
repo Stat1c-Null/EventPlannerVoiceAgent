@@ -6,7 +6,8 @@ import { createAgent, type AgentDeps } from "../src/agent/agent.ts";
 import type { PlacesQuery } from "../src/services/places.ts";
 import type { EventPlan, PlaceResult } from "../src/types.ts";
 
-type SetTask = { command_type: "set-task"; task_id: string; objective: string; action_items: Array<{ key?: string; choices?: string[] }> };
+type ActionItem = { item_type: string; key?: string; choices?: string[]; statement?: string };
+type SetTask = { command_type: "set-task"; task_id: string; objective: string; action_items: ActionItem[] };
 type AnyCommand = { command_type: string; instruction?: string };
 
 const commands = (call: MockCall) => call.commands as unknown as AnyCommand[];
@@ -17,6 +18,13 @@ const lastTask = (call: MockCall): SetTask => tasks(call).at(-1)!;
 const lastTaskName = (call: MockCall): string => lastTask(call).task_id.split("#")[0]!;
 const instructions = (call: MockCall): string[] =>
   commands(call).flatMap((c) => (c.command_type === "send-instruction" && c.instruction ? [c.instruction] : []));
+/** The SDK's hangup() is an instruction ending in "hang up the call". */
+const hungUp = (call: MockCall): boolean => instructions(call).some((i) => i.includes("hang up the call"));
+/** The verbatim line the current wrap-up task makes the agent say. */
+const wrapUpScript = (call: MockCall): string =>
+  lastTask(call).action_items.find((i) => i.item_type === "say")!.statement!;
+const fieldItems = (task: SetTask) => task.action_items.filter((i) => i.item_type === "field");
+const countOf = (text: string, part: string) => text.split(part).length - 1;
 
 const CALLER = "+15551234567";
 const phoneCall = () =>
@@ -50,10 +58,10 @@ async function complete(agent: guava.Agent, call: MockCall, taskId: string, fiel
   await agent.handlers.onTaskComplete(taskId, call);
 }
 
-/** Answer the current pick or confirm task: its first field gets `choice`, its second (if any) `refine`. */
+/** Answer the current pick/confirm/wrap-up task: its first field gets `choice`, its second (if any) `refine`. */
 async function answer(agent: guava.Agent, call: MockCall, choice: string, refine?: string) {
   const task = lastTask(call);
-  const [choiceKey, refineKey] = task.action_items.map((item) => item.key!);
+  const [choiceKey, refineKey] = fieldItems(task).map((item) => item.key!);
   call.setField(choiceKey!, choice);
   if (refine !== undefined && refineKey) call.setField(refineKey, refine);
   await agent.handlers.onTaskComplete(task.task_id, call);
@@ -75,7 +83,7 @@ async function throughDetails(agent: guava.Agent, call: MockCall, type: string, 
 
 const endEvent = {} as unknown as guava.BotSessionEnded;
 
-test("a date with a gift runs triage → details → 4 picks → confirm → saved, texted, hung up", async () => {
+test("a date with a gift runs triage → details → 4 picks → confirm → saved, texted, ID read twice", async () => {
   const { agent, created, sent } = setup();
   const call = phoneCall();
 
@@ -107,10 +115,69 @@ test("a date with a gift runs triage → details → 4 picks → confirm → sav
   assert.equal(sent[0]![1], CALLER);
   assert.ok(sent[0]![2]!.includes("http://localhost:3000/e/BLUE-FALCON-42"));
 
-  const goodbye = instructions(call).at(-1)!;
-  assert.ok(goodbye.includes("BLUE-FALCON-42"));
-  assert.ok(goodbye.toLowerCase().includes("simulated"));
-  assert.ok(goodbye.includes("texted"));
+  assert.equal(lastTaskName(call), "wrap-up");
+  const script = wrapUpScript(call);
+  assert.equal(countOf(script, "BLUE FALCON 42"), 2, script);
+  assert.ok(script.toLowerCase().includes("simulated"));
+  assert.ok(script.includes("texted"));
+});
+
+test("Guava's datetime object is saved as a readable local ISO time", async () => {
+  const { agent, created } = setup();
+  const call = phoneCall();
+  await agent.handlers.onCallStart(call);
+  await complete(agent, call, "triage", {
+    event_type: "date",
+    event_datetime: { day: 18, month: 10, year: 2026, hour: 18, minute: 0 },
+    area: "Atlanta, Georgia",
+  });
+  await complete(agent, call, "details:date", { vibe: "casual", wants_gift: "no" });
+  await pickFirstOfEach(agent, call, ["dinner", "activity", "parking"]);
+  await answer(agent, call, "looks good");
+  assert.equal(created[0]!.basics.when, "2026-10-18T18:00");
+  assert.equal(created[0]!.items[0]!.time, "2026-10-18T18:00");
+});
+
+test("the agent never hangs up until the caller confirms, and repeats the ID on request", async () => {
+  const { agent } = setup();
+  const call = phoneCall();
+  await throughDetails(agent, call, "friends hangout", { group_size: 4, vibe: "bars" });
+  await pickFirstOfEach(agent, call, ["activity", "food", "parking"]);
+  await answer(agent, call, "looks good");
+
+  assert.equal(lastTaskName(call), "wrap-up");
+  assert.deepEqual(fieldItems(lastTask(call))[0]!.choices, ["ready to hang up", "repeat the event ID"]);
+  assert.equal(hungUp(call), false);
+
+  const firstWrapUp = lastTask(call).task_id;
+  await answer(agent, call, "repeat the event ID");
+  assert.equal(lastTaskName(call), "wrap-up");
+  assert.notEqual(lastTask(call).task_id, firstWrapUp);
+  assert.equal(countOf(wrapUpScript(call), "BLUE FALCON 42"), 2);
+  assert.equal(hungUp(call), false);
+
+  await answer(agent, call, "ready to hang up");
+  assert.equal(hungUp(call), true);
+});
+
+test("the event ID and share link are printed to the console when the plan is saved", async () => {
+  const lines: string[] = [];
+  const format = (f: string, args: unknown[]) => args.reduce<string>((s, a) => s.replace("%s", String(a)), f);
+  const logger: guava.Logger = {
+    debug: () => {},
+    info: (f: string, ...args: unknown[]) => void lines.push(format(f, args)),
+    warn: () => {},
+    error: () => {},
+  };
+  const { agent } = setup({ logger });
+  const call = phoneCall();
+  await throughDetails(agent, call, "friends hangout", { group_size: 4, vibe: "bars" });
+  await pickFirstOfEach(agent, call, ["activity", "food", "parking"]);
+  await answer(agent, call, "looks good");
+  assert.ok(
+    lines.some((l) => l.includes("BLUE-FALCON-42") && l.includes("http://localhost:3000/e/BLUE-FALCON-42")),
+    lines.join("\n"),
+  );
 });
 
 test("parking is searched near the chosen primary venue", async () => {
@@ -280,10 +347,11 @@ test("SMS failure still ends the call with the spoken ID and link", async () => 
   await throughDetails(agent, call, "friends hangout", { group_size: 4, vibe: "bars" });
   await pickFirstOfEach(agent, call, ["activity", "food", "parking"]);
   await answer(agent, call, "looks good");
-  const goodbye = instructions(call).at(-1)!;
-  assert.ok(goodbye.includes("BLUE-FALCON-42"));
-  assert.ok(goodbye.includes("http://localhost:3000/e/BLUE-FALCON-42"));
-  assert.ok(!goodbye.includes("texted"));
+  const script = wrapUpScript(call);
+  assert.equal(countOf(script, "BLUE FALCON 42"), 2, script);
+  assert.ok(script.includes("http://localhost:3000/e/BLUE-FALCON-42"));
+  assert.ok(!script.includes("texted"));
+  assert.equal(hungUp(call), false);
 });
 
 test("a WebRTC call has no caller number, so no SMS is attempted", async () => {
@@ -302,8 +370,12 @@ test("a DB failure ends the call honestly with no event ID and no SMS", async ()
   await throughDetails(agent, call, "friends hangout", { group_size: 4, vibe: "bars" });
   await pickFirstOfEach(agent, call, ["activity", "food", "parking"]);
   await answer(agent, call, "looks good");
-  const goodbye = instructions(call).at(-1)!;
-  assert.ok(goodbye.toLowerCase().includes("couldn't be saved"));
-  assert.ok(!goodbye.includes("BLUE-FALCON-42"));
+  assert.equal(lastTaskName(call), "wrap-up");
+  const script = wrapUpScript(call);
+  assert.ok(script.toLowerCase().includes("couldn't be saved"));
+  assert.ok(!script.includes("BLUE"));
   assert.equal(sent.length, 0);
+  assert.equal(hungUp(call), false);
+  await answer(agent, call, "ready to hang up");
+  assert.equal(hungUp(call), true);
 });

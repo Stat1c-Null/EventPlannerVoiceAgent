@@ -19,6 +19,8 @@ export interface PlanDraft {
   attempt: number;
   saved: boolean;
   callerPhone: string | null;
+  /** What the wrap-up task reads (event ID twice, or the save-failure apology); set once saved. */
+  wrapUpScript?: string;
 }
 
 export function newDraft(callerPhone: string | null): PlanDraft {
